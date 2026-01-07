@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - NetAgent{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <h2 class="mb-1">Settings</h2>
+    <p class="text-muted mb-0">Configure platform settings</p>
+</div>
+
+<div class="row">
+    <div class="col-lg-3">
+        <div class="nav flex-column nav-pills" role="tablist">
+            <button class="nav-link active text-start" data-bs-toggle="pill" data-bs-target="#tab-general">
+                <i class="bi bi-gear me-2"></i>General
+            </button>
+            <button class="nav-link text-start" data-bs-toggle="pill" data-bs-target="#tab-notifications">
+                <i class="bi bi-bell me-2"></i>Notifications
+            </button>
+            <button class="nav-link text-start" data-bs-toggle="pill" data-bs-target="#tab-integrations">
+                <i class="bi bi-plug me-2"></i>Integrations
+            </button>
+            <button class="nav-link text-start" data-bs-toggle="pill" data-bs-target="#tab-security">
+                <i class="bi bi-shield-check me-2"></i>Security
+            </button>
+            <button class="nav-link text-start" data-bs-toggle="pill" data-bs-target="#tab-about">
+                <i class="bi bi-info-circle me-2"></i>About
+            </button>
+        </div>
+    </div>
+
+    <div class="col-lg-9">
+        <div class="tab-content">
+            <!-- General Settings -->
+            <div class="tab-pane fade show active" id="tab-general">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">General Settings</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Platform Name</label>
+                            <input type="text" class="form-control" id="setting-platform-name"
+                                   value="NetAgent" placeholder="NetAgent">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Default Agent Model</label>
+                            <select class="form-select" id="setting-default-model">
+                                <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                                <option value="gemini-2.0-pro">Gemini 2.0 Pro</option>
+                                <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Session Timeout (minutes)</label>
+                            <input type="number" class="form-control" id="setting-session-timeout"
+                                   value="30" min="5" max="480">
+                        </div>
+                        <button class="btn btn-primary" onclick="saveGeneralSettings()">
+                            <i class="bi bi-check-lg me-1"></i>Save Changes
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notifications -->
+            <div class="tab-pane fade" id="tab-notifications">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Email Configuration</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    <label class="form-label">SMTP Server</label>
+                                    <input type="text" class="form-control" id="setting-smtp-server"
+                                           placeholder="smtp.example.com">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Port</label>
+                                    <input type="number" class="form-control" id="setting-smtp-port"
+                                           value="587" min="1" max="65535">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">From Address</label>
+                            <input type="email" class="form-control" id="setting-smtp-from"
+                                   placeholder="netagent@example.com">
+                        </div>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="setting-smtp-tls">
+                            <label class="form-check-label" for="setting-smtp-tls">Use TLS</label>
+                        </div>
+                        <button class="btn btn-outline-secondary me-2" onclick="testEmail()">
+                            <i class="bi bi-send me-1"></i>Send Test Email
+                        </button>
+                        <button class="btn btn-primary" onclick="saveEmailSettings()">
+                            <i class="bi bi-check-lg me-1"></i>Save
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Slack Configuration</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Default Notification Channel</label>
+                            <input type="text" class="form-control" id="setting-slack-channel"
+                                   placeholder="#network-alerts">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Approval Channel</label>
+                            <input type="text" class="form-control" id="setting-slack-approval-channel"
+                                   placeholder="#netagent-approvals">
+                        </div>
+                        <button class="btn btn-primary" onclick="saveSlackSettings()">
+                            <i class="bi bi-check-lg me-1"></i>Save
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Integrations -->
+            <div class="tab-pane fade" id="tab-integrations">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Confluence (RAG)</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Base URL</label>
+                            <input type="url" class="form-control" id="setting-confluence-url"
+                                   placeholder="https://company.atlassian.net/wiki">
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Username/Email</label>
+                                    <input type="text" class="form-control" id="setting-confluence-user">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">API Token</label>
+                                    <input type="password" class="form-control" id="setting-confluence-token">
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn btn-outline-secondary me-2" onclick="testConfluence()">
+                            <i class="bi bi-lightning me-1"></i>Test Connection
+                        </button>
+                        <button class="btn btn-primary" onclick="saveConfluenceSettings()">
+                            <i class="bi bi-check-lg me-1"></i>Save
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Jira</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Base URL</label>
+                            <input type="url" class="form-control" id="setting-jira-url"
+                                   placeholder="https://company.atlassian.net">
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Username/Email</label>
+                                    <input type="text" class="form-control" id="setting-jira-user">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">API Token</label>
+                                    <input type="password" class="form-control" id="setting-jira-token">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Default Project Key</label>
+                            <input type="text" class="form-control" id="setting-jira-project"
+                                   placeholder="NET">
+                        </div>
+                        <button class="btn btn-primary" onclick="saveJiraSettings()">
+                            <i class="bi bi-check-lg me-1"></i>Save
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Security -->
+            <div class="tab-pane fade" id="tab-security">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Approval Settings</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Approval Timeout (hours)</label>
+                            <input type="number" class="form-control" id="setting-approval-timeout"
+                                   value="24" min="1" max="168">
+                            <div class="form-text">Pending approvals will expire after this time</div>
+                        </div>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="setting-require-approval-high">
+                            <label class="form-check-label" for="setting-require-approval-high">
+                                Require approval for high-risk actions
+                            </label>
+                        </div>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="setting-slack-approvals">
+                            <label class="form-check-label" for="setting-slack-approvals">
+                                Send approval requests to Slack
+                            </label>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveSecuritySettings()">
+                            <i class="bi bi-check-lg me-1"></i>Save
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Audit Settings</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Audit Log Retention (days)</label>
+                            <input type="number" class="form-control" id="setting-audit-retention"
+                                   value="365" min="30" max="3650">
+                        </div>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="setting-audit-tool-results" checked>
+                            <label class="form-check-label" for="setting-audit-tool-results">
+                                Log tool call results (may contain sensitive data)
+                            </label>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveAuditSettings()">
+                            <i class="bi bi-check-lg me-1"></i>Save
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- About -->
+            <div class="tab-pane fade" id="tab-about">
+                <div class="card">
+                    <div class="card-body text-center py-5">
+                        <h1 class="display-4 mb-3">NetAgent</h1>
+                        <p class="lead text-muted">AI Agent Platform for Network Engineering</p>
+                        <p class="text-muted">Version 1.0.0</p>
+                        <hr class="my-4">
+                        <div class="row justify-content-center">
+                            <div class="col-md-6">
+                                <dl class="row">
+                                    <dt class="col-6 text-end">Database</dt>
+                                    <dd class="col-6 text-start"><span class="badge bg-success">Connected</span></dd>
+                                    <dt class="col-6 text-end">Redis</dt>
+                                    <dd class="col-6 text-start"><span class="badge bg-success">Connected</span></dd>
+                                    <dt class="col-6 text-end">LLM API</dt>
+                                    <dd class="col-6 text-start"><span class="badge bg-success">Available</span></dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadSettings();
+});
+
+async function loadSettings() {
+    try {
+        const settings = await api.get('/api/settings');
+        populateSettings(settings);
+    } catch (error) {
+        console.log('Failed to load settings');
+    }
+}
+
+function populateSettings(settings) {
+    for (const [key, value] of Object.entries(settings)) {
+        const element = document.getElementById(`setting-${key.replace(/_/g, '-')}`);
+        if (element) {
+            if (element.type === 'checkbox') {
+                element.checked = value;
+            } else {
+                element.value = value;
+            }
+        }
+    }
+}
+
+async function saveGeneralSettings() {
+    await saveSettings({
+        platform_name: document.getElementById('setting-platform-name').value,
+        default_model: document.getElementById('setting-default-model').value,
+        session_timeout: parseInt(document.getElementById('setting-session-timeout').value)
+    });
+}
+
+async function saveEmailSettings() {
+    await saveSettings({
+        smtp_server: document.getElementById('setting-smtp-server').value,
+        smtp_port: parseInt(document.getElementById('setting-smtp-port').value),
+        smtp_from: document.getElementById('setting-smtp-from').value,
+        smtp_tls: document.getElementById('setting-smtp-tls').checked
+    });
+}
+
+async function saveSlackSettings() {
+    await saveSettings({
+        slack_channel: document.getElementById('setting-slack-channel').value,
+        slack_approval_channel: document.getElementById('setting-slack-approval-channel').value
+    });
+}
+
+async function saveConfluenceSettings() {
+    await saveSettings({
+        confluence_url: document.getElementById('setting-confluence-url').value,
+        confluence_user: document.getElementById('setting-confluence-user').value,
+        confluence_token: document.getElementById('setting-confluence-token').value
+    });
+}
+
+async function saveJiraSettings() {
+    await saveSettings({
+        jira_url: document.getElementById('setting-jira-url').value,
+        jira_user: document.getElementById('setting-jira-user').value,
+        jira_token: document.getElementById('setting-jira-token').value,
+        jira_project: document.getElementById('setting-jira-project').value
+    });
+}
+
+async function saveSecuritySettings() {
+    await saveSettings({
+        approval_timeout: parseInt(document.getElementById('setting-approval-timeout').value),
+        require_approval_high: document.getElementById('setting-require-approval-high').checked,
+        slack_approvals: document.getElementById('setting-slack-approvals').checked
+    });
+}
+
+async function saveAuditSettings() {
+    await saveSettings({
+        audit_retention: parseInt(document.getElementById('setting-audit-retention').value),
+        audit_tool_results: document.getElementById('setting-audit-tool-results').checked
+    });
+}
+
+async function saveSettings(settings) {
+    try {
+        await api.put('/api/settings', settings);
+        showToast('Settings saved', 'success');
+    } catch (error) {
+        showToast('Failed to save settings', 'error');
+    }
+}
+
+async function testEmail() {
+    try {
+        await api.post('/api/settings/test-email');
+        showToast('Test email sent', 'success');
+    } catch (error) {
+        showToast('Failed to send test email', 'error');
+    }
+}
+
+async function testConfluence() {
+    try {
+        const result = await api.post('/api/settings/test-confluence');
+        if (result.success) {
+            showToast('Connection successful', 'success');
+        } else {
+            showToast(`Connection failed: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showToast('Connection test failed', 'error');
+    }
+}
+</script>
+{% endblock %}

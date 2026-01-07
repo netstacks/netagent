@@ -1,0 +1,373 @@
+{% extends "base.html" %}
+
+{% block title %}Device Credentials - NetAgent{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">Device Credentials</h2>
+        <p class="text-muted mb-0">Manage SSH credentials for network devices</p>
+    </div>
+    <div>
+        <button class="btn btn-outline-secondary me-2" id="btn-refresh">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createCredModal">
+            <i class="bi bi-plus-lg"></i> Add Credentials
+        </button>
+    </div>
+</div>
+
+<!-- Credentials Table -->
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Device Patterns</th>
+                    <th>Username</th>
+                    <th>Device Type</th>
+                    <th>Priority</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="credentials-table-body">
+                <!-- Credentials will be loaded here -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Empty State -->
+<div id="credentials-empty" class="text-center py-5 d-none">
+    <i class="bi bi-hdd-network display-1 text-muted"></i>
+    <h4 class="mt-3">No Credentials Configured</h4>
+    <p class="text-muted">Add device credentials to enable SSH access for agents</p>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createCredModal">
+        <i class="bi bi-plus-lg"></i> Add Credentials
+    </button>
+</div>
+
+<!-- Test Connection Section -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-plug me-2"></i>Test Connection</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6">
+                <div class="input-group">
+                    <input type="text" class="form-control" id="test-hostname"
+                           placeholder="Enter hostname or IP...">
+                    <button class="btn btn-primary" id="btn-test-connection">
+                        <i class="bi bi-lightning"></i> Test
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div id="test-result" class="mt-3" style="display: none;">
+            <!-- Test result will appear here -->
+        </div>
+    </div>
+</div>
+
+<!-- Create/Edit Credential Modal -->
+<div class="modal fade" id="createCredModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="credModalTitle">Add Credentials</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="cred-id">
+                <div class="mb-3">
+                    <label class="form-label">Name <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="cred-name" required
+                           placeholder="e.g., Core Routers">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-control" id="cred-description" rows="2"
+                              placeholder="Optional description"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Device Patterns <span class="text-danger">*</span></label>
+                    <textarea class="form-control font-monospace" id="cred-patterns" rows="3"
+                              placeholder="router-*&#10;switch-nyc-*&#10;*.example.com"></textarea>
+                    <div class="form-text">One glob pattern per line. Devices matching these patterns will use these credentials.</div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Username <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="cred-username" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Password <span class="text-danger">*</span></label>
+                            <input type="password" class="form-control" id="cred-password" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Device Type</label>
+                            <select class="form-select" id="cred-device-type">
+                                <option value="autodetect">Auto-detect</option>
+                                <option value="cisco_ios">Cisco IOS</option>
+                                <option value="cisco_xe">Cisco IOS-XE</option>
+                                <option value="cisco_nxos">Cisco NX-OS</option>
+                                <option value="juniper_junos">Juniper Junos</option>
+                                <option value="arista_eos">Arista EOS</option>
+                                <option value="linux">Linux</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">SSH Port</label>
+                            <input type="number" class="form-control" id="cred-port" value="22" min="1" max="65535">
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Priority</label>
+                    <input type="number" class="form-control" id="cred-priority" value="0" min="0" max="100">
+                    <div class="form-text">Higher priority credentials are tried first when multiple match</div>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="cred-enabled" checked>
+                    <label class="form-check-label" for="cred-enabled">Enabled</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btn-save-cred">
+                    <i class="bi bi-check-lg me-1"></i>Save
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let credentials = [];
+let editingId = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadCredentials();
+
+    document.getElementById('btn-refresh').addEventListener('click', loadCredentials);
+    document.getElementById('btn-save-cred').addEventListener('click', saveCredential);
+    document.getElementById('btn-test-connection').addEventListener('click', testConnection);
+
+    // Reset modal on open
+    document.getElementById('createCredModal').addEventListener('show.bs.modal', function(e) {
+        if (!editingId) {
+            resetForm();
+            document.getElementById('credModalTitle').textContent = 'Add Credentials';
+        }
+    });
+
+    document.getElementById('createCredModal').addEventListener('hidden.bs.modal', function() {
+        editingId = null;
+    });
+});
+
+async function loadCredentials() {
+    try {
+        credentials = await api.get('/api/devices/credentials');
+        renderCredentials();
+    } catch (error) {
+        showToast('Failed to load credentials', 'error');
+    }
+}
+
+function renderCredentials() {
+    const tbody = document.getElementById('credentials-table-body');
+    const empty = document.getElementById('credentials-empty');
+
+    if (!credentials || credentials.length === 0) {
+        tbody.innerHTML = '';
+        empty.classList.remove('d-none');
+        return;
+    }
+
+    empty.classList.add('d-none');
+    tbody.innerHTML = credentials.map(cred => `
+        <tr>
+            <td>
+                <strong>${escapeHtml(cred.name)}</strong>
+                ${cred.description ? `<br><small class="text-muted">${escapeHtml(cred.description)}</small>` : ''}
+            </td>
+            <td>
+                <code>${escapeHtml((cred.device_patterns || []).slice(0, 2).join(', '))}${cred.device_patterns?.length > 2 ? '...' : ''}</code>
+            </td>
+            <td><code>${escapeHtml(cred.username)}</code></td>
+            <td>${cred.device_type || 'autodetect'}</td>
+            <td>${cred.priority || 0}</td>
+            <td>
+                ${cred.enabled
+                    ? '<span class="badge bg-success">Enabled</span>'
+                    : '<span class="badge bg-secondary">Disabled</span>'}
+            </td>
+            <td class="text-end">
+                <button class="btn btn-sm btn-outline-secondary me-1" onclick="editCredential(${cred.id})">
+                    <i class="bi bi-pencil"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteCredential(${cred.id})">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function resetForm() {
+    document.getElementById('cred-id').value = '';
+    document.getElementById('cred-name').value = '';
+    document.getElementById('cred-description').value = '';
+    document.getElementById('cred-patterns').value = '';
+    document.getElementById('cred-username').value = '';
+    document.getElementById('cred-password').value = '';
+    document.getElementById('cred-device-type').value = 'autodetect';
+    document.getElementById('cred-port').value = '22';
+    document.getElementById('cred-priority').value = '0';
+    document.getElementById('cred-enabled').checked = true;
+}
+
+function editCredential(id) {
+    const cred = credentials.find(c => c.id === id);
+    if (!cred) return;
+
+    editingId = id;
+    document.getElementById('credModalTitle').textContent = 'Edit Credentials';
+    document.getElementById('cred-id').value = id;
+    document.getElementById('cred-name').value = cred.name;
+    document.getElementById('cred-description').value = cred.description || '';
+    document.getElementById('cred-patterns').value = (cred.device_patterns || []).join('\n');
+    document.getElementById('cred-username').value = cred.username || '';
+    document.getElementById('cred-password').value = ''; // Don't show password
+    document.getElementById('cred-device-type').value = cred.device_type || 'autodetect';
+    document.getElementById('cred-port').value = cred.port || 22;
+    document.getElementById('cred-priority').value = cred.priority || 0;
+    document.getElementById('cred-enabled').checked = cred.enabled !== false;
+
+    new bootstrap.Modal(document.getElementById('createCredModal')).show();
+}
+
+async function saveCredential() {
+    const id = document.getElementById('cred-id').value;
+    const patterns = document.getElementById('cred-patterns').value
+        .split('\n')
+        .map(p => p.trim())
+        .filter(p => p);
+
+    const data = {
+        name: document.getElementById('cred-name').value,
+        description: document.getElementById('cred-description').value,
+        device_patterns: patterns,
+        username: document.getElementById('cred-username').value,
+        device_type: document.getElementById('cred-device-type').value,
+        port: parseInt(document.getElementById('cred-port').value),
+        priority: parseInt(document.getElementById('cred-priority').value),
+        enabled: document.getElementById('cred-enabled').checked
+    };
+
+    const password = document.getElementById('cred-password').value;
+    if (password) {
+        data.password = password;
+    }
+
+    try {
+        if (id) {
+            await api.put(`/api/devices/credentials/${id}`, data);
+            showToast('Credentials updated', 'success');
+        } else {
+            data.password = password; // Required for new
+            await api.post('/api/devices/credentials', data);
+            showToast('Credentials created', 'success');
+        }
+
+        bootstrap.Modal.getInstance(document.getElementById('createCredModal')).hide();
+        loadCredentials();
+    } catch (error) {
+        showToast('Failed to save credentials', 'error');
+    }
+}
+
+async function deleteCredential(id) {
+    if (!confirm('Are you sure you want to delete these credentials?')) return;
+
+    try {
+        await api.delete(`/api/devices/credentials/${id}`);
+        showToast('Credentials deleted', 'success');
+        loadCredentials();
+    } catch (error) {
+        showToast('Failed to delete credentials', 'error');
+    }
+}
+
+async function testConnection() {
+    const hostname = document.getElementById('test-hostname').value.trim();
+    if (!hostname) {
+        showToast('Please enter a hostname', 'warning');
+        return;
+    }
+
+    const resultDiv = document.getElementById('test-result');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = `
+        <div class="d-flex align-items-center">
+            <span class="spinner-border spinner-border-sm me-2"></span>
+            Testing connection to ${escapeHtml(hostname)}...
+        </div>
+    `;
+
+    try {
+        const result = await api.post('/api/devices/test', { hostname });
+
+        if (result.success) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-success mb-0">
+                    <i class="bi bi-check-circle me-2"></i>
+                    <strong>Connection successful!</strong>
+                    <br><small>Device type: ${result.device_type || 'Unknown'}</small>
+                    ${result.credentials_used ? `<br><small>Using credentials: ${result.credentials_used}</small>` : ''}
+                </div>
+            `;
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger mb-0">
+                    <i class="bi bi-x-circle me-2"></i>
+                    <strong>Connection failed</strong>
+                    <br><small>${escapeHtml(result.error || 'Unknown error')}</small>
+                </div>
+            `;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger mb-0">
+                <i class="bi bi-x-circle me-2"></i>
+                <strong>Test failed</strong>
+                <br><small>${escapeHtml(error.message || 'Unknown error')}</small>
+            </div>
+        `;
+    }
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

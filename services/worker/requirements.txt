@@ -1,0 +1,8 @@
+celery==5.3.6
+redis==5.0.1
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+pgvector==0.2.4
+httpx==0.26.0
+cryptography==42.0.1
+croniter==2.0.1

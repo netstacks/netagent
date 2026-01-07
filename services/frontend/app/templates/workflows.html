@@ -1,0 +1,457 @@
+{% extends "base.html" %}
+
+{% block title %}Workflows - NetAgent{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">Workflows</h2>
+        <p class="text-muted mb-0">Build and manage multi-agent workflows</p>
+    </div>
+    <div>
+        <button class="btn btn-outline-secondary me-2" id="btn-refresh">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        <a href="/workflows/builder" class="btn btn-primary">
+            <i class="bi bi-plus-lg"></i> Create Workflow
+        </a>
+    </div>
+</div>
+
+<!-- Tabs -->
+<ul class="nav nav-tabs mb-4" role="tablist">
+    <li class="nav-item">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-workflows">
+            <i class="bi bi-diagram-3 me-1"></i>Workflows
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-runs">
+            <i class="bi bi-play-circle me-1"></i>Recent Runs
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-scheduled">
+            <i class="bi bi-calendar-check me-1"></i>Scheduled
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <!-- Workflows Tab -->
+    <div class="tab-pane fade show active" id="tab-workflows">
+        <div class="row g-4" id="workflows-grid">
+            <!-- Workflows will be loaded here -->
+        </div>
+
+        <!-- Empty State -->
+        <div id="workflows-empty" class="text-center py-5 d-none">
+            <i class="bi bi-diagram-3 display-1 text-muted"></i>
+            <h4 class="mt-3">No Workflows Yet</h4>
+            <p class="text-muted">Create your first workflow to orchestrate multiple agents</p>
+            <a href="/workflows/builder" class="btn btn-primary">
+                <i class="bi bi-plus-lg"></i> Create Workflow
+            </a>
+        </div>
+    </div>
+
+    <!-- Recent Runs Tab -->
+    <div class="tab-pane fade" id="tab-runs">
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Workflow</th>
+                            <th>Triggered By</th>
+                            <th>Status</th>
+                            <th>Started</th>
+                            <th>Duration</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="runs-table-body">
+                        <!-- Runs will be loaded here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div id="runs-empty" class="text-center py-5 d-none">
+            <p class="text-muted">No workflow runs yet</p>
+        </div>
+    </div>
+
+    <!-- Scheduled Tab -->
+    <div class="tab-pane fade" id="tab-scheduled">
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Workflow</th>
+                            <th>Schedule</th>
+                            <th>Next Run</th>
+                            <th>Last Run</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scheduled-table-body">
+                        <!-- Scheduled workflows will be loaded here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div id="scheduled-empty" class="text-center py-5 d-none">
+            <p class="text-muted">No scheduled workflows</p>
+        </div>
+    </div>
+</div>
+
+<!-- Run Workflow Modal -->
+<div class="modal fade" id="runWorkflowModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Run Workflow</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Run <strong id="run-workflow-name"></strong>?</p>
+                <div class="mb-3">
+                    <label class="form-label">Input Data (optional)</label>
+                    <textarea class="form-control font-monospace" id="run-input-data" rows="4"
+                              placeholder='{"key": "value"}'></textarea>
+                    <div class="form-text">JSON data to pass to the workflow</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btn-confirm-run">
+                    <i class="bi bi-play-fill me-1"></i>Run
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Workflow Modal -->
+<div class="modal fade" id="deleteWorkflowModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Delete Workflow</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete <strong id="delete-workflow-name"></strong>?</p>
+                <p class="text-muted small">This will also delete all run history for this workflow.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="btn-confirm-delete">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const triggerIcons = {
+    'manual': 'bi-hand-index',
+    'scheduled': 'bi-calendar-check',
+    'webhook': 'bi-link-45deg'
+};
+
+const statusColors = {
+    'pending': 'secondary',
+    'running': 'primary',
+    'completed': 'success',
+    'failed': 'danger',
+    'waiting_approval': 'warning'
+};
+
+let workflows = [];
+let runs = [];
+let runWorkflowId = null;
+let deleteWorkflowId = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadWorkflows();
+    loadRuns();
+
+    document.getElementById('btn-refresh').addEventListener('click', function() {
+        loadWorkflows();
+        loadRuns();
+    });
+
+    document.getElementById('btn-confirm-run').addEventListener('click', confirmRun);
+    document.getElementById('btn-confirm-delete').addEventListener('click', confirmDelete);
+});
+
+async function loadWorkflows() {
+    try {
+        workflows = await api.get('/api/workflows');
+        renderWorkflows();
+        renderScheduled();
+    } catch (error) {
+        showToast('Failed to load workflows', 'error');
+    }
+}
+
+async function loadRuns() {
+    try {
+        // Load runs from all workflows
+        const response = await api.get('/api/workflows/runs/recent');
+        runs = response || [];
+        renderRuns();
+    } catch (error) {
+        console.error('Failed to load runs:', error);
+    }
+}
+
+function renderWorkflows() {
+    const grid = document.getElementById('workflows-grid');
+    const empty = document.getElementById('workflows-empty');
+
+    if (workflows.length === 0) {
+        grid.innerHTML = '';
+        empty.classList.remove('d-none');
+        return;
+    }
+
+    empty.classList.add('d-none');
+    grid.innerHTML = workflows.map(workflow => `
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-3">
+                        <div>
+                            <h5 class="card-title mb-1">${escapeHtml(workflow.name)}</h5>
+                            <span class="badge bg-secondary">
+                                <i class="bi ${triggerIcons[workflow.trigger_type] || 'bi-play'} me-1"></i>
+                                ${workflow.trigger_type}
+                            </span>
+                            ${workflow.enabled ? '' : '<span class="badge bg-danger ms-1">Disabled</span>'}
+                        </div>
+                        <div class="dropdown">
+                            <button class="btn btn-link text-muted p-0" data-bs-toggle="dropdown">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li><a class="dropdown-item" href="/workflows/${workflow.id}/builder"><i class="bi bi-pencil me-2"></i>Edit</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="showRunModal(${workflow.id}, '${escapeHtml(workflow.name)}')"><i class="bi bi-play-fill me-2"></i>Run</a></li>
+                                <li><a class="dropdown-item" href="/workflows/${workflow.id}/runs"><i class="bi bi-clock-history me-2"></i>History</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item text-danger" href="#" onclick="showDeleteModal(${workflow.id}, '${escapeHtml(workflow.name)}')"><i class="bi bi-trash me-2"></i>Delete</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                    <p class="card-text text-muted small">${escapeHtml(workflow.description || 'No description')}</p>
+
+                    <div class="workflow-preview mb-3">
+                        ${renderWorkflowPreview(workflow)}
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center pt-3 border-top">
+                        <small class="text-muted">
+                            ${workflow.trigger_type === 'scheduled' ? `<i class="bi bi-clock me-1"></i>${workflow.schedule_cron}` : ''}
+                        </small>
+                        <button class="btn btn-sm btn-primary" onclick="showRunModal(${workflow.id}, '${escapeHtml(workflow.name)}')">
+                            <i class="bi bi-play-fill me-1"></i>Run
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderWorkflowPreview(workflow) {
+    if (!workflow.definition || !workflow.definition.nodes) {
+        return '<span class="text-muted small">No nodes defined</span>';
+    }
+
+    const nodes = workflow.definition.nodes.filter(n => n.type !== 'start');
+    if (nodes.length === 0) {
+        return '<span class="text-muted small">No nodes defined</span>';
+    }
+
+    const nodeTypes = {
+        'agent': { icon: 'bi-robot', color: 'primary' },
+        'condition': { icon: 'bi-signpost-split', color: 'warning' },
+        'parallel': { icon: 'bi-arrows-expand', color: 'info' },
+        'output_email': { icon: 'bi-envelope', color: 'success' },
+        'output_slack': { icon: 'bi-slack', color: 'success' },
+        'output_jira': { icon: 'bi-ticket', color: 'success' }
+    };
+
+    return `
+        <div class="d-flex align-items-center gap-1 flex-wrap">
+            ${nodes.slice(0, 4).map(node => {
+                const type = nodeTypes[node.type] || { icon: 'bi-circle', color: 'secondary' };
+                return `<span class="badge bg-${type.color}-subtle text-${type.color}"><i class="bi ${type.icon}"></i></span>`;
+            }).join('<i class="bi bi-arrow-right text-muted"></i>')}
+            ${nodes.length > 4 ? `<span class="text-muted small">+${nodes.length - 4} more</span>` : ''}
+        </div>
+    `;
+}
+
+function renderRuns() {
+    const tbody = document.getElementById('runs-table-body');
+    const empty = document.getElementById('runs-empty');
+
+    if (runs.length === 0) {
+        tbody.innerHTML = '';
+        empty.classList.remove('d-none');
+        return;
+    }
+
+    empty.classList.add('d-none');
+    tbody.innerHTML = runs.map(run => {
+        const workflow = workflows.find(w => w.id === run.workflow_id) || { name: 'Unknown' };
+        const duration = run.completed_at && run.started_at
+            ? formatDuration(new Date(run.completed_at) - new Date(run.started_at))
+            : '-';
+
+        return `
+            <tr>
+                <td>
+                    <strong>${escapeHtml(workflow.name)}</strong>
+                </td>
+                <td>
+                    <i class="bi ${triggerIcons[run.trigger_type] || 'bi-play'} me-1"></i>
+                    ${run.trigger_type}
+                    ${run.initiated_by ? `<br><small class="text-muted">by ${run.initiated_by_email || 'system'}</small>` : ''}
+                </td>
+                <td>
+                    <span class="badge bg-${statusColors[run.status] || 'secondary'}">
+                        ${run.status}
+                    </span>
+                </td>
+                <td>
+                    <span title="${run.started_at}">${formatTimeAgo(run.started_at)}</span>
+                </td>
+                <td>${duration}</td>
+                <td class="text-end">
+                    <a href="/workflows/runs/${run.id}" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-eye"></i> View
+                    </a>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderScheduled() {
+    const tbody = document.getElementById('scheduled-table-body');
+    const empty = document.getElementById('scheduled-empty');
+
+    const scheduled = workflows.filter(w => w.trigger_type === 'scheduled');
+
+    if (scheduled.length === 0) {
+        tbody.innerHTML = '';
+        empty.classList.remove('d-none');
+        return;
+    }
+
+    empty.classList.add('d-none');
+    tbody.innerHTML = scheduled.map(workflow => `
+        <tr>
+            <td><strong>${escapeHtml(workflow.name)}</strong></td>
+            <td><code>${workflow.schedule_cron || '-'}</code></td>
+            <td>-</td>
+            <td>-</td>
+            <td>
+                ${workflow.enabled
+                    ? '<span class="badge bg-success">Active</span>'
+                    : '<span class="badge bg-secondary">Paused</span>'}
+            </td>
+            <td class="text-end">
+                <a href="/workflows/${workflow.id}/builder" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-pencil"></i>
+                </a>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function showRunModal(workflowId, workflowName) {
+    runWorkflowId = workflowId;
+    document.getElementById('run-workflow-name').textContent = workflowName;
+    document.getElementById('run-input-data').value = '';
+    new bootstrap.Modal(document.getElementById('runWorkflowModal')).show();
+}
+
+async function confirmRun() {
+    if (!runWorkflowId) return;
+
+    let inputData = {};
+    const inputText = document.getElementById('run-input-data').value.trim();
+    if (inputText) {
+        try {
+            inputData = JSON.parse(inputText);
+        } catch (e) {
+            showToast('Invalid JSON input', 'error');
+            return;
+        }
+    }
+
+    try {
+        const run = await api.post(`/api/workflows/${runWorkflowId}/run`, { input_data: inputData });
+        bootstrap.Modal.getInstance(document.getElementById('runWorkflowModal')).hide();
+        showToast('Workflow started', 'success');
+        window.location.href = `/workflows/runs/${run.id}`;
+    } catch (error) {
+        showToast('Failed to start workflow', 'error');
+    }
+}
+
+function showDeleteModal(workflowId, workflowName) {
+    deleteWorkflowId = workflowId;
+    document.getElementById('delete-workflow-name').textContent = workflowName;
+    new bootstrap.Modal(document.getElementById('deleteWorkflowModal')).show();
+}
+
+async function confirmDelete() {
+    if (!deleteWorkflowId) return;
+
+    try {
+        await api.delete(`/api/workflows/${deleteWorkflowId}`);
+        bootstrap.Modal.getInstance(document.getElementById('deleteWorkflowModal')).hide();
+        showToast('Workflow deleted', 'success');
+        loadWorkflows();
+    } catch (error) {
+        showToast('Failed to delete workflow', 'error');
+    }
+}
+
+function formatTimeAgo(dateString) {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    const now = new Date();
+    const seconds = Math.floor((now - date) / 1000);
+
+    if (seconds < 60) return 'Just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+function formatDuration(ms) {
+    if (!ms || ms < 0) return '-';
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

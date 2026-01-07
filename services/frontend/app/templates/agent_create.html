@@ -1,0 +1,517 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Edit' if agent else 'Create' }} Agent - NetAgent{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-4">
+    <a href="/agents" class="btn btn-outline-secondary me-3">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <div>
+        <h2 class="mb-0">{{ 'Edit Agent' if agent else 'Create Agent' }}</h2>
+        <p class="text-muted mb-0">{{ 'Modify agent configuration' if agent else 'Configure your new AI agent' }}</p>
+    </div>
+</div>
+
+<form id="agent-form">
+    <div class="row">
+        <!-- Main Content -->
+        <div class="col-lg-8">
+            <!-- Basic Info Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Basic Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-8">
+                            <label class="form-label">Agent Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="agent-name" required
+                                   placeholder="e.g., BGP Troubleshooter">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Type <span class="text-danger">*</span></label>
+                            <select class="form-select" id="agent-type" required>
+                                <option value="triage">Triage</option>
+                                <option value="bgp">BGP</option>
+                                <option value="ospf">OSPF</option>
+                                <option value="validator">Validator</option>
+                                <option value="docs">Documentation</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Description</label>
+                            <textarea class="form-control" id="agent-description" rows="2"
+                                      placeholder="Brief description of what this agent does"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Prompt Card -->
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-terminal me-2"></i>System Prompt</h5>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-expand-prompt">
+                        <i class="bi bi-arrows-fullscreen"></i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <textarea class="form-control font-monospace" id="agent-prompt" rows="12"
+                              placeholder="Enter the system prompt that defines this agent's behavior..."></textarea>
+                    <div class="form-text">
+                        Available variables: <code>{{user.name}}</code>, <code>{{user.email}}</code>,
+                        <code>{{current_date}}</code>, <code>{{current_time}}</code>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tools Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-tools me-2"></i>Tools</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-3">Select the tools this agent can use</p>
+
+                    <h6 class="text-muted mb-2">Built-in Tools</h6>
+                    <div class="row g-2 mb-4">
+                        <div class="col-md-6">
+                            <div class="form-check card p-3">
+                                <input class="form-check-input" type="checkbox" id="tool-ssh" value="ssh_command">
+                                <label class="form-check-label w-100" for="tool-ssh">
+                                    <strong>SSH Command</strong>
+                                    <br><small class="text-muted">Execute read-only commands on network devices</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check card p-3">
+                                <input class="form-check-input" type="checkbox" id="tool-knowledge" value="search_knowledge">
+                                <label class="form-check-label w-100" for="tool-knowledge">
+                                    <strong>Search Knowledge</strong>
+                                    <br><small class="text-muted">Search indexed documentation and wiki pages</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check card p-3">
+                                <input class="form-check-input" type="checkbox" id="tool-handoff" value="handoff_to_agent">
+                                <label class="form-check-label w-100" for="tool-handoff">
+                                    <strong>Handoff to Agent</strong>
+                                    <br><small class="text-muted">Transfer conversation to another agent</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check card p-3">
+                                <input class="form-check-input" type="checkbox" id="tool-approval" value="request_approval">
+                                <label class="form-check-label w-100" for="tool-approval">
+                                    <strong>Request Approval</strong>
+                                    <br><small class="text-muted">Request human approval before proceeding</small>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6 class="text-muted mb-2">MCP Server Tools</h6>
+                    <div id="mcp-tools-container">
+                        <p class="text-muted small">Select MCP servers below to enable their tools</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-lg-4">
+            <!-- Model Settings Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-cpu me-2"></i>Model Settings</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Model</label>
+                        <select class="form-select" id="agent-model">
+                            <option value="gemini-2.0-flash">Gemini 2.0 Flash (Fast)</option>
+                            <option value="gemini-2.0-pro">Gemini 2.0 Pro (Powerful)</option>
+                            <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                            <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Temperature: <span id="temp-value">0.1</span></label>
+                        <input type="range" class="form-range" id="agent-temperature"
+                               min="0" max="1" step="0.1" value="0.1">
+                        <div class="d-flex justify-content-between">
+                            <small class="text-muted">Precise</small>
+                            <small class="text-muted">Creative</small>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Max Tokens</label>
+                        <input type="number" class="form-control" id="agent-max-tokens"
+                               value="4096" min="256" max="32768">
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label">Max Iterations</label>
+                        <input type="number" class="form-control" id="agent-max-iterations"
+                               value="10" min="1" max="50">
+                        <div class="form-text">Maximum tool calls per conversation turn</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Autonomy Level Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i>Autonomy Level</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="radio" name="autonomy" id="autonomy-diagnose" value="diagnose">
+                        <label class="form-check-label" for="autonomy-diagnose">
+                            <strong>Diagnose Only</strong>
+                            <br><small class="text-muted">Read-only analysis, no actions</small>
+                        </label>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="radio" name="autonomy" id="autonomy-recommend" value="recommend" checked>
+                        <label class="form-check-label" for="autonomy-recommend">
+                            <strong>Recommend</strong>
+                            <br><small class="text-muted">Suggest actions, require approval</small>
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="autonomy" id="autonomy-execute" value="execute">
+                        <label class="form-check-label" for="autonomy-execute">
+                            <strong>Execute</strong>
+                            <br><small class="text-muted">Take actions autonomously</small>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Knowledge Bases Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-book me-2"></i>Knowledge Bases</h5>
+                </div>
+                <div class="card-body">
+                    <div id="knowledge-bases-list">
+                        <p class="text-muted small mb-0">Loading...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MCP Servers Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-plug me-2"></i>MCP Servers</h5>
+                </div>
+                <div class="card-body">
+                    <div id="mcp-servers-list">
+                        <p class="text-muted small mb-0">Loading...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Device Access Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-hdd-network me-2"></i>Device Access</h5>
+                </div>
+                <div class="card-body">
+                    <label class="form-label">Allowed Device Patterns</label>
+                    <textarea class="form-control font-monospace" id="device-patterns" rows="3"
+                              placeholder="*&#10;router-*&#10;switch-nyc-*">*</textarea>
+                    <div class="form-text">One glob pattern per line. Use * as wildcard.</div>
+                </div>
+            </div>
+
+            <!-- Status Card -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="agent-enabled" checked>
+                        <label class="form-check-label" for="agent-enabled">Agent Enabled</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="d-flex justify-content-between py-4 border-top">
+        <a href="/agents" class="btn btn-outline-secondary">Cancel</a>
+        <div>
+            <button type="button" class="btn btn-outline-primary me-2" id="btn-test-agent">
+                <i class="bi bi-play me-1"></i>Test Agent
+            </button>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check-lg me-1"></i>{{ 'Save Changes' if agent else 'Create Agent' }}
+            </button>
+        </div>
+    </div>
+</form>
+
+<!-- Fullscreen Prompt Modal -->
+<div class="modal fade" id="promptModal" tabindex="-1">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">System Prompt Editor</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <textarea class="form-control font-monospace h-100" id="modal-prompt"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btn-apply-prompt">Apply</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const agentId = {{ agent.id if agent else 'null' }};
+const templateId = new URLSearchParams(window.location.search).get('template');
+
+let knowledgeBases = [];
+let mcpServers = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadKnowledgeBases();
+    loadMCPServers();
+
+    if (agentId) {
+        loadAgent();
+    } else if (templateId) {
+        loadTemplate();
+    }
+
+    // Temperature slider
+    document.getElementById('agent-temperature').addEventListener('input', function() {
+        document.getElementById('temp-value').textContent = this.value;
+    });
+
+    // Fullscreen prompt editor
+    document.getElementById('btn-expand-prompt').addEventListener('click', function() {
+        document.getElementById('modal-prompt').value = document.getElementById('agent-prompt').value;
+        new bootstrap.Modal(document.getElementById('promptModal')).show();
+    });
+
+    document.getElementById('btn-apply-prompt').addEventListener('click', function() {
+        document.getElementById('agent-prompt').value = document.getElementById('modal-prompt').value;
+        bootstrap.Modal.getInstance(document.getElementById('promptModal')).hide();
+    });
+
+    // Form submission
+    document.getElementById('agent-form').addEventListener('submit', saveAgent);
+});
+
+async function loadAgent() {
+    try {
+        const agent = await api.get(`/api/agents/${agentId}`);
+        populateForm(agent);
+    } catch (error) {
+        showToast('Failed to load agent', 'error');
+    }
+}
+
+async function loadTemplate() {
+    try {
+        const templates = await api.get('/api/agents/templates');
+        const template = templates.find(t => t.id == templateId);
+        if (template) {
+            document.getElementById('agent-name').value = template.name + ' (Copy)';
+            document.getElementById('agent-type').value = template.agent_type;
+            document.getElementById('agent-description').value = template.description || '';
+            document.getElementById('agent-prompt').value = template.system_prompt || '';
+
+            // Set default tools
+            if (template.default_tools) {
+                template.default_tools.forEach(tool => {
+                    const checkbox = document.querySelector(`input[value="${tool}"]`);
+                    if (checkbox) checkbox.checked = true;
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Failed to load template:', error);
+    }
+}
+
+function populateForm(agent) {
+    document.getElementById('agent-name').value = agent.name;
+    document.getElementById('agent-type').value = agent.agent_type;
+    document.getElementById('agent-description').value = agent.description || '';
+    document.getElementById('agent-prompt').value = agent.system_prompt || '';
+    document.getElementById('agent-model').value = agent.model || 'gemini-2.0-flash';
+    document.getElementById('agent-temperature').value = agent.temperature || 0.1;
+    document.getElementById('temp-value').textContent = agent.temperature || 0.1;
+    document.getElementById('agent-max-tokens').value = agent.max_tokens || 4096;
+    document.getElementById('agent-max-iterations').value = agent.max_iterations || 10;
+    document.getElementById('agent-enabled').checked = agent.enabled;
+
+    // Autonomy level
+    document.querySelector(`input[name="autonomy"][value="${agent.autonomy_level || 'recommend'}"]`).checked = true;
+
+    // Tools
+    if (agent.allowed_tools) {
+        agent.allowed_tools.forEach(tool => {
+            const checkbox = document.querySelector(`input[value="${tool}"]`);
+            if (checkbox) checkbox.checked = true;
+        });
+    }
+
+    // Device patterns
+    if (agent.allowed_device_patterns) {
+        document.getElementById('device-patterns').value = agent.allowed_device_patterns.join('\n');
+    }
+
+    // Knowledge bases and MCP servers will be checked after loading
+    setTimeout(() => {
+        if (agent.knowledge_base_ids) {
+            agent.knowledge_base_ids.forEach(id => {
+                const checkbox = document.querySelector(`input[name="knowledge-base"][value="${id}"]`);
+                if (checkbox) checkbox.checked = true;
+            });
+        }
+        if (agent.mcp_server_ids) {
+            agent.mcp_server_ids.forEach(id => {
+                const checkbox = document.querySelector(`input[name="mcp-server"][value="${id}"]`);
+                if (checkbox) checkbox.checked = true;
+            });
+        }
+    }, 500);
+}
+
+async function loadKnowledgeBases() {
+    try {
+        knowledgeBases = await api.get('/api/knowledge');
+        renderKnowledgeBases();
+    } catch (error) {
+        document.getElementById('knowledge-bases-list').innerHTML =
+            '<p class="text-muted small mb-0">Failed to load knowledge bases</p>';
+    }
+}
+
+async function loadMCPServers() {
+    try {
+        mcpServers = await api.get('/api/mcp/servers');
+        renderMCPServers();
+    } catch (error) {
+        document.getElementById('mcp-servers-list').innerHTML =
+            '<p class="text-muted small mb-0">Failed to load MCP servers</p>';
+    }
+}
+
+function renderKnowledgeBases() {
+    const container = document.getElementById('knowledge-bases-list');
+    if (knowledgeBases.length === 0) {
+        container.innerHTML = '<p class="text-muted small mb-0">No knowledge bases configured</p>';
+        return;
+    }
+
+    container.innerHTML = knowledgeBases.map(kb => `
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="knowledge-base"
+                   id="kb-${kb.id}" value="${kb.id}">
+            <label class="form-check-label" for="kb-${kb.id}">
+                ${escapeHtml(kb.name)}
+                <br><small class="text-muted">${kb.document_count || 0} documents</small>
+            </label>
+        </div>
+    `).join('');
+}
+
+function renderMCPServers() {
+    const container = document.getElementById('mcp-servers-list');
+    if (mcpServers.length === 0) {
+        container.innerHTML = '<p class="text-muted small mb-0">No MCP servers configured</p>';
+        return;
+    }
+
+    container.innerHTML = mcpServers.map(server => `
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="mcp-server"
+                   id="mcp-${server.id}" value="${server.id}">
+            <label class="form-check-label" for="mcp-${server.id}">
+                ${escapeHtml(server.name)}
+                <br><small class="text-muted">${(server.tools || []).length} tools</small>
+            </label>
+        </div>
+    `).join('');
+}
+
+async function saveAgent(e) {
+    e.preventDefault();
+
+    // Collect tools
+    const allowedTools = [];
+    document.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+        if (cb.value && !cb.name) allowedTools.push(cb.value);
+    });
+
+    // Collect knowledge bases
+    const knowledgeBaseIds = [];
+    document.querySelectorAll('input[name="knowledge-base"]:checked').forEach(cb => {
+        knowledgeBaseIds.push(parseInt(cb.value));
+    });
+
+    // Collect MCP servers
+    const mcpServerIds = [];
+    document.querySelectorAll('input[name="mcp-server"]:checked').forEach(cb => {
+        mcpServerIds.push(parseInt(cb.value));
+    });
+
+    // Collect device patterns
+    const devicePatterns = document.getElementById('device-patterns').value
+        .split('\n')
+        .map(p => p.trim())
+        .filter(p => p);
+
+    const data = {
+        name: document.getElementById('agent-name').value,
+        agent_type: document.getElementById('agent-type').value,
+        description: document.getElementById('agent-description').value,
+        system_prompt: document.getElementById('agent-prompt').value,
+        model: document.getElementById('agent-model').value,
+        temperature: parseFloat(document.getElementById('agent-temperature').value),
+        max_tokens: parseInt(document.getElementById('agent-max-tokens').value),
+        max_iterations: parseInt(document.getElementById('agent-max-iterations').value),
+        autonomy_level: document.querySelector('input[name="autonomy"]:checked').value,
+        allowed_tools: allowedTools,
+        knowledge_base_ids: knowledgeBaseIds,
+        mcp_server_ids: mcpServerIds,
+        allowed_device_patterns: devicePatterns,
+        enabled: document.getElementById('agent-enabled').checked
+    };
+
+    try {
+        if (agentId) {
+            await api.put(`/api/agents/${agentId}`, data);
+            showToast('Agent updated successfully', 'success');
+        } else {
+            const result = await api.post('/api/agents', data);
+            showToast('Agent created successfully', 'success');
+            window.location.href = `/agents/${result.id}/edit`;
+        }
+    } catch (error) {
+        showToast('Failed to save agent', 'error');
+    }
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

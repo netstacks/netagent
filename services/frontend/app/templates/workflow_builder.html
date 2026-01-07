@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Edit' if workflow else 'Create' }} Workflow - NetAgent{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/workflow-builder.css">
+{% endblock %}
+
+{% block content %}
+<div class="workflow-builder-container">
+    <!-- Toolbar -->
+    <div class="workflow-toolbar">
+        <div class="d-flex align-items-center">
+            <a href="/workflows" class="btn btn-outline-secondary btn-sm me-3">
+                <i class="bi bi-arrow-left"></i>
+            </a>
+            <input type="text" class="form-control form-control-sm workflow-name-input" id="workflow-name"
+                   value="{{ workflow.name if workflow else 'New Workflow' }}" placeholder="Workflow name">
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-secondary btn-sm" id="btn-settings" data-bs-toggle="modal" data-bs-target="#settingsModal">
+                <i class="bi bi-gear"></i> Settings
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" id="btn-zoom-out">
+                <i class="bi bi-zoom-out"></i>
+            </button>
+            <span class="zoom-level" id="zoom-level">100%</span>
+            <button class="btn btn-outline-secondary btn-sm" id="btn-zoom-in">
+                <i class="bi bi-zoom-in"></i>
+            </button>
+            <button class="btn btn-outline-primary btn-sm" id="btn-test">
+                <i class="bi bi-play"></i> Test
+            </button>
+            <button class="btn btn-primary btn-sm" id="btn-save">
+                <i class="bi bi-check-lg"></i> Save
+            </button>
+        </div>
+    </div>
+
+    <div class="workflow-main">
+        <!-- Node Palette -->
+        <div class="workflow-palette">
+            <div class="palette-section">
+                <h6 class="palette-section-title">Agents</h6>
+                <div class="palette-items" id="agent-palette">
+                    <!-- Agent nodes loaded dynamically -->
+                </div>
+            </div>
+
+            <div class="palette-section">
+                <h6 class="palette-section-title">Logic</h6>
+                <div class="palette-items">
+                    <div class="palette-item" draggable="true" data-type="condition">
+                        <i class="bi bi-signpost-split text-warning"></i>
+                        <span>Condition</span>
+                    </div>
+                    <div class="palette-item" draggable="true" data-type="parallel">
+                        <i class="bi bi-arrows-expand text-info"></i>
+                        <span>Parallel</span>
+                    </div>
+                    <div class="palette-item" draggable="true" data-type="join">
+                        <i class="bi bi-arrows-collapse text-info"></i>
+                        <span>Join</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="palette-section">
+                <h6 class="palette-section-title">Outputs</h6>
+                <div class="palette-items">
+                    <div class="palette-item" draggable="true" data-type="output_email">
+                        <i class="bi bi-envelope text-success"></i>
+                        <span>Email</span>
+                    </div>
+                    <div class="palette-item" draggable="true" data-type="output_slack">
+                        <i class="bi bi-slack text-success"></i>
+                        <span>Slack</span>
+                    </div>
+                    <div class="palette-item" draggable="true" data-type="output_jira">
+                        <i class="bi bi-ticket text-success"></i>
+                        <span>Jira</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Canvas -->
+        <div class="workflow-canvas-container" id="canvas-container">
+            <svg class="workflow-connections" id="connections-svg"></svg>
+            <div class="workflow-canvas" id="workflow-canvas">
+                <!-- Start node (always present) -->
+                <div class="workflow-node start-node" id="node-start" style="left: 50px; top: 200px;">
+                    <div class="node-content">
+                        <i class="bi bi-play-circle"></i>
+                        <span>Start</span>
+                    </div>
+                    <div class="node-port output-port" data-port="trigger"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Properties Panel -->
+        <div class="workflow-properties" id="properties-panel">
+            <div class="properties-header">
+                <h6>Properties</h6>
+            </div>
+            <div class="properties-body" id="properties-body">
+                <p class="text-muted small text-center py-4">Select a node to view properties</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal fade" id="settingsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Workflow Settings</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-control" id="workflow-description" rows="2"
+                              placeholder="What does this workflow do?">{{ workflow.description if workflow else '' }}</textarea>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Trigger Type</label>
+                    <select class="form-select" id="trigger-type">
+                        <option value="manual" {% if not workflow or workflow.trigger_type == 'manual' %}selected{% endif %}>Manual</option>
+                        <option value="scheduled" {% if workflow and workflow.trigger_type == 'scheduled' %}selected{% endif %}>Scheduled</option>
+                        <option value="webhook" {% if workflow and workflow.trigger_type == 'webhook' %}selected{% endif %}>Webhook</option>
+                    </select>
+                </div>
+
+                <div class="mb-3" id="schedule-config" style="display: none;">
+                    <label class="form-label">Cron Schedule</label>
+                    <input type="text" class="form-control font-monospace" id="schedule-cron"
+                           value="{{ workflow.schedule_cron if workflow else '' }}"
+                           placeholder="0 9 * * 1-5">
+                    <div class="form-text">
+                        Examples: <code>0 9 * * *</code> (daily at 9am), <code>*/30 * * * *</code> (every 30 min)
+                    </div>
+                </div>
+
+                <div class="mb-3" id="webhook-config" style="display: none;">
+                    <label class="form-label">Webhook URL</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="webhook-url" readonly
+                               value="{{ url_for('triggers.webhook', workflow_id=workflow.id, _external=True) if workflow else 'Save workflow first' }}">
+                        <button class="btn btn-outline-secondary" type="button" onclick="copyWebhookUrl()">
+                            <i class="bi bi-clipboard"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Default Output</label>
+                    <select class="form-select" id="default-output">
+                        <option value="">None</option>
+                        <option value="email">Email</option>
+                        <option value="slack">Slack</option>
+                        <option value="jira">Jira</option>
+                    </select>
+                </div>
+
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="workflow-enabled"
+                           {% if not workflow or workflow.enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="workflow-enabled">Workflow Enabled</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Node Templates (hidden) -->
+<template id="node-template">
+    <div class="workflow-node" draggable="true">
+        <div class="node-header">
+            <i class="node-icon"></i>
+            <span class="node-title"></span>
+            <button class="node-delete btn btn-link btn-sm text-danger p-0">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>
+        <div class="node-body"></div>
+        <div class="node-ports">
+            <div class="input-ports"></div>
+            <div class="output-ports"></div>
+        </div>
+    </div>
+</template>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const workflowId = {{ workflow.id if workflow else 'null' }};
+const existingDefinition = {{ workflow.definition | tojson if workflow and workflow.definition else '{"nodes":[],"edges":[]}' }};
+</script>
+<script src="/static/js/workflow-builder.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Load agents for palette
+    loadAgents();
+
+    // Trigger type toggle
+    document.getElementById('trigger-type').addEventListener('change', function() {
+        document.getElementById('schedule-config').style.display = this.value === 'scheduled' ? 'block' : 'none';
+        document.getElementById('webhook-config').style.display = this.value === 'webhook' ? 'block' : 'none';
+    });
+
+    // Initialize trigger config visibility
+    const triggerType = document.getElementById('trigger-type').value;
+    document.getElementById('schedule-config').style.display = triggerType === 'scheduled' ? 'block' : 'none';
+    document.getElementById('webhook-config').style.display = triggerType === 'webhook' ? 'block' : 'none';
+
+    // Save button
+    document.getElementById('btn-save').addEventListener('click', saveWorkflow);
+
+    // Test button
+    document.getElementById('btn-test').addEventListener('click', testWorkflow);
+
+    // Zoom controls
+    document.getElementById('btn-zoom-in').addEventListener('click', () => workflowBuilder.zoomIn());
+    document.getElementById('btn-zoom-out').addEventListener('click', () => workflowBuilder.zoomOut());
+
+    // Load existing workflow
+    if (workflowId && existingDefinition) {
+        workflowBuilder.loadDefinition(existingDefinition);
+    }
+});
+
+async function loadAgents() {
+    try {
+        const agents = await api.get('/api/agents');
+        const palette = document.getElementById('agent-palette');
+
+        if (agents.length === 0) {
+            palette.innerHTML = '<p class="text-muted small px-2">No agents configured</p>';
+            return;
+        }
+
+        palette.innerHTML = agents.map(agent => `
+            <div class="palette-item" draggable="true" data-type="agent" data-agent-id="${agent.id}">
+                <i class="bi bi-robot text-primary"></i>
+                <span>${escapeHtml(agent.name)}</span>
+            </div>
+        `).join('');
+
+        // Re-initialize drag handlers
+        workflowBuilder.initPaletteDrag();
+    } catch (error) {
+        console.error('Failed to load agents:', error);
+    }
+}
+
+async function saveWorkflow() {
+    const definition = workflowBuilder.getDefinition();
+
+    const data = {
+        name: document.getElementById('workflow-name').value,
+        description: document.getElementById('workflow-description').value,
+        trigger_type: document.getElementById('trigger-type').value,
+        schedule_cron: document.getElementById('schedule-cron').value || null,
+        default_output_type: document.getElementById('default-output').value || null,
+        enabled: document.getElementById('workflow-enabled').checked,
+        definition: definition
+    };
+
+    try {
+        if (workflowId) {
+            await api.put(`/api/workflows/${workflowId}`, data);
+            showToast('Workflow saved', 'success');
+        } else {
+            const result = await api.post('/api/workflows', data);
+            showToast('Workflow created', 'success');
+            window.location.href = `/workflows/${result.id}/builder`;
+        }
+    } catch (error) {
+        showToast('Failed to save workflow', 'error');
+    }
+}
+
+async function testWorkflow() {
+    if (!workflowId) {
+        showToast('Save workflow first', 'warning');
+        return;
+    }
+
+    try {
+        const run = await api.post(`/api/workflows/${workflowId}/run`, { input_data: {} });
+        showToast('Test run started', 'success');
+        window.open(`/workflows/runs/${run.id}`, '_blank');
+    } catch (error) {
+        showToast('Failed to start test run', 'error');
+    }
+}
+
+function copyWebhookUrl() {
+    const input = document.getElementById('webhook-url');
+    input.select();
+    document.execCommand('copy');
+    showToast('URL copied to clipboard', 'success');
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

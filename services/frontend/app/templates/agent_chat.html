@@ -1,0 +1,470 @@
+{% extends "base.html" %}
+
+{% block title %}Chat with {{ agent.name }} - NetAgent{% endblock %}
+
+{% block content %}
+<div class="chat-container">
+    <!-- Chat Header -->
+    <div class="chat-header d-flex align-items-center justify-content-between">
+        <div class="d-flex align-items-center">
+            <a href="/agents" class="btn btn-outline-secondary btn-sm me-3">
+                <i class="bi bi-arrow-left"></i>
+            </a>
+            <div class="agent-avatar me-3">
+                <i class="bi bi-robot"></i>
+            </div>
+            <div>
+                <h5 class="mb-0">{{ agent.name }}</h5>
+                <small class="text-muted">{{ agent.agent_type }} agent</small>
+            </div>
+        </div>
+        <div class="d-flex align-items-center">
+            <span class="badge bg-success me-3" id="status-badge">Ready</span>
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="dropdown">
+                    <i class="bi bi-three-dots-vertical"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="#" id="btn-new-session"><i class="bi bi-plus me-2"></i>New Session</a></li>
+                    <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#sessionsModal"><i class="bi bi-clock-history me-2"></i>Session History</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#actionsModal"><i class="bi bi-list-check me-2"></i>Action Log</a></li>
+                    <li><a class="dropdown-item" href="/agents/{{ agent.id }}/edit"><i class="bi bi-gear me-2"></i>Agent Settings</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Messages -->
+    <div class="chat-messages" id="chat-messages">
+        <div class="text-center py-5" id="welcome-message">
+            <div class="agent-avatar-lg mx-auto mb-4">
+                <i class="bi bi-robot"></i>
+            </div>
+            <h4>{{ agent.name }}</h4>
+            <p class="text-muted">{{ agent.description or 'Start a conversation with this agent' }}</p>
+            <div class="d-flex justify-content-center gap-2 flex-wrap mt-4">
+                {% if agent.agent_type == 'triage' %}
+                <button class="btn btn-outline-secondary btn-sm suggestion-btn">I have a network issue to report</button>
+                <button class="btn btn-outline-secondary btn-sm suggestion-btn">BGP session is down on router-01</button>
+                {% elif agent.agent_type == 'bgp' %}
+                <button class="btn btn-outline-secondary btn-sm suggestion-btn">Show me BGP neighbors on router-01</button>
+                <button class="btn btn-outline-secondary btn-sm suggestion-btn">Why is BGP peer 10.1.1.1 down?</button>
+                {% else %}
+                <button class="btn btn-outline-secondary btn-sm suggestion-btn">What can you help me with?</button>
+                <button class="btn btn-outline-secondary btn-sm suggestion-btn">Show me available commands</button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Input -->
+    <div class="chat-input-container">
+        <form id="chat-form" class="d-flex align-items-end gap-2">
+            <div class="flex-grow-1">
+                <textarea class="form-control" id="message-input" rows="1"
+                          placeholder="Type your message..." autofocus></textarea>
+            </div>
+            <button type="button" class="btn btn-outline-secondary" id="btn-stop" disabled>
+                <i class="bi bi-stop-fill"></i>
+            </button>
+            <button type="submit" class="btn btn-primary" id="btn-send">
+                <i class="bi bi-send"></i>
+            </button>
+        </form>
+        <div class="text-center mt-2">
+            <small class="text-muted">
+                <i class="bi bi-info-circle me-1"></i>
+                {{ agent.model }} &middot; Temperature: {{ agent.temperature }}
+            </small>
+        </div>
+    </div>
+</div>
+
+<!-- Sessions Modal -->
+<div class="modal fade" id="sessionsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Session History</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="sessions-list">
+                    <p class="text-muted text-center">Loading sessions...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Actions Modal -->
+<div class="modal fade" id="actionsModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Action Log</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="actions-list">
+                    <p class="text-muted text-center">Loading actions...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/chat.js"></script>
+<script>
+const agentId = {{ agent.id }};
+const agentName = "{{ agent.name }}";
+
+let sessionId = null;
+let eventSource = null;
+let isStreaming = false;
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Auto-resize textarea
+    const textarea = document.getElementById('message-input');
+    textarea.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+    });
+
+    // Handle Enter key (Shift+Enter for new line)
+    textarea.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            document.getElementById('chat-form').dispatchEvent(new Event('submit'));
+        }
+    });
+
+    // Form submission
+    document.getElementById('chat-form').addEventListener('submit', sendMessage);
+
+    // Stop button
+    document.getElementById('btn-stop').addEventListener('click', stopGeneration);
+
+    // New session
+    document.getElementById('btn-new-session').addEventListener('click', newSession);
+
+    // Suggestion buttons
+    document.querySelectorAll('.suggestion-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.getElementById('message-input').value = this.textContent;
+            document.getElementById('chat-form').dispatchEvent(new Event('submit'));
+        });
+    });
+
+    // Load previous session if exists
+    const savedSessionId = localStorage.getItem(`netagent_session_${agentId}`);
+    if (savedSessionId) {
+        loadSession(savedSessionId);
+    }
+});
+
+async function sendMessage(e) {
+    e.preventDefault();
+
+    const input = document.getElementById('message-input');
+    const message = input.value.trim();
+    if (!message || isStreaming) return;
+
+    // Hide welcome message
+    document.getElementById('welcome-message').style.display = 'none';
+
+    // Add user message to chat
+    appendMessage('user', message);
+    input.value = '';
+    input.style.height = 'auto';
+
+    // Create session if needed
+    if (!sessionId) {
+        try {
+            const session = await api.post('/api/chat/sessions', { agent_id: agentId });
+            sessionId = session.id;
+            localStorage.setItem(`netagent_session_${agentId}`, sessionId);
+        } catch (error) {
+            showToast('Failed to create session', 'error');
+            return;
+        }
+    }
+
+    // Start streaming
+    startStreaming(message);
+}
+
+function startStreaming(message) {
+    isStreaming = true;
+    updateStatus('thinking');
+    document.getElementById('btn-send').disabled = true;
+    document.getElementById('btn-stop').disabled = false;
+
+    // Create assistant message placeholder
+    const messageDiv = appendMessage('assistant', '', true);
+    const contentDiv = messageDiv.querySelector('.message-content');
+    const thinkingDiv = messageDiv.querySelector('.thinking-section');
+
+    // Start SSE connection
+    const url = `/api/chat/sessions/${sessionId}/message`;
+
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: message })
+    }).then(response => {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let currentContent = '';
+
+        function processStream() {
+            reader.read().then(({ done, value }) => {
+                if (done) {
+                    finishStreaming();
+                    return;
+                }
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            handleStreamEvent(data, contentDiv, thinkingDiv, currentContent);
+                            if (data.type === 'content') {
+                                currentContent += data.content || '';
+                            }
+                        } catch (e) {
+                            console.error('Parse error:', e);
+                        }
+                    }
+                }
+
+                processStream();
+            }).catch(error => {
+                console.error('Stream error:', error);
+                finishStreaming();
+            });
+        }
+
+        processStream();
+    }).catch(error => {
+        showToast('Failed to send message', 'error');
+        finishStreaming();
+    });
+}
+
+function handleStreamEvent(data, contentDiv, thinkingDiv, currentContent) {
+    switch (data.type) {
+        case 'thinking':
+            updateStatus('thinking');
+            if (thinkingDiv) {
+                thinkingDiv.style.display = 'block';
+                thinkingDiv.querySelector('.thinking-content').textContent = data.content;
+            }
+            break;
+
+        case 'tool_call':
+            updateStatus('using tool: ' + data.tool_name);
+            appendToolCall(thinkingDiv, data);
+            break;
+
+        case 'tool_result':
+            updateToolResult(thinkingDiv, data);
+            break;
+
+        case 'content':
+            updateStatus('responding');
+            contentDiv.innerHTML = marked.parse(currentContent + (data.content || ''));
+            scrollToBottom();
+            break;
+
+        case 'done':
+            finishStreaming();
+            break;
+
+        case 'error':
+            showToast(data.error || 'An error occurred', 'error');
+            finishStreaming();
+            break;
+    }
+}
+
+function appendMessage(role, content, isStreaming = false) {
+    const container = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = `chat-message ${role}-message`;
+
+    if (role === 'user') {
+        div.innerHTML = `
+            <div class="message-avatar">
+                <i class="bi bi-person"></i>
+            </div>
+            <div class="message-body">
+                <div class="message-content">${escapeHtml(content)}</div>
+            </div>
+        `;
+    } else {
+        div.innerHTML = `
+            <div class="message-avatar">
+                <i class="bi bi-robot"></i>
+            </div>
+            <div class="message-body">
+                <div class="thinking-section" style="display: none;">
+                    <div class="thinking-header" onclick="toggleThinking(this)">
+                        <i class="bi bi-chevron-right"></i>
+                        <span>Thinking...</span>
+                    </div>
+                    <div class="thinking-content"></div>
+                    <div class="tool-calls"></div>
+                </div>
+                <div class="message-content">${isStreaming ? '<span class="typing-indicator"></span>' : marked.parse(content)}</div>
+            </div>
+        `;
+    }
+
+    container.appendChild(div);
+    scrollToBottom();
+    return div;
+}
+
+function appendToolCall(thinkingDiv, data) {
+    if (!thinkingDiv) return;
+
+    const toolsContainer = thinkingDiv.querySelector('.tool-calls');
+    const toolDiv = document.createElement('div');
+    toolDiv.className = 'tool-call';
+    toolDiv.id = `tool-${data.tool_id}`;
+    toolDiv.innerHTML = `
+        <div class="tool-header">
+            <i class="bi bi-gear-fill text-info me-2"></i>
+            <strong>${escapeHtml(data.tool_name)}</strong>
+            <span class="badge bg-warning ms-2">Running</span>
+        </div>
+        <div class="tool-input">
+            <pre><code>${JSON.stringify(data.arguments, null, 2)}</code></pre>
+        </div>
+        <div class="tool-output" style="display: none;"></div>
+    `;
+    toolsContainer.appendChild(toolDiv);
+    scrollToBottom();
+}
+
+function updateToolResult(thinkingDiv, data) {
+    if (!thinkingDiv) return;
+
+    const toolDiv = thinkingDiv.querySelector(`#tool-${data.tool_id}`);
+    if (toolDiv) {
+        toolDiv.querySelector('.badge').className = 'badge bg-success ms-2';
+        toolDiv.querySelector('.badge').textContent = 'Complete';
+
+        const outputDiv = toolDiv.querySelector('.tool-output');
+        outputDiv.style.display = 'block';
+        outputDiv.innerHTML = `<pre><code>${escapeHtml(JSON.stringify(data.result, null, 2))}</code></pre>`;
+    }
+}
+
+function toggleThinking(header) {
+    const section = header.parentElement;
+    section.classList.toggle('collapsed');
+    const icon = header.querySelector('i');
+    icon.className = section.classList.contains('collapsed') ? 'bi bi-chevron-right' : 'bi bi-chevron-down';
+}
+
+function finishStreaming() {
+    isStreaming = false;
+    updateStatus('ready');
+    document.getElementById('btn-send').disabled = false;
+    document.getElementById('btn-stop').disabled = true;
+
+    // Collapse thinking sections
+    document.querySelectorAll('.thinking-section').forEach(section => {
+        section.classList.add('collapsed');
+        const header = section.querySelector('.thinking-header span');
+        if (header) header.textContent = 'Show reasoning';
+    });
+}
+
+function stopGeneration() {
+    if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+    }
+    finishStreaming();
+    showToast('Generation stopped', 'info');
+}
+
+function updateStatus(status) {
+    const badge = document.getElementById('status-badge');
+    switch (status) {
+        case 'thinking':
+            badge.className = 'badge bg-warning';
+            badge.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Thinking';
+            break;
+        case 'responding':
+            badge.className = 'badge bg-info';
+            badge.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Responding';
+            break;
+        default:
+            badge.className = 'badge bg-success';
+            badge.textContent = 'Ready';
+    }
+}
+
+function newSession() {
+    sessionId = null;
+    localStorage.removeItem(`netagent_session_${agentId}`);
+    document.getElementById('chat-messages').innerHTML = document.getElementById('welcome-message').outerHTML;
+    document.getElementById('welcome-message').style.display = 'block';
+    showToast('New session started', 'info');
+}
+
+async function loadSession(sid) {
+    try {
+        const messages = await api.get(`/api/chat/sessions/${sid}/messages`);
+        if (messages && messages.length > 0) {
+            sessionId = sid;
+            document.getElementById('welcome-message').style.display = 'none';
+            messages.forEach(msg => {
+                appendMessage(msg.role, msg.content);
+            });
+        }
+    } catch (error) {
+        console.log('Could not restore session');
+        localStorage.removeItem(`netagent_session_${agentId}`);
+    }
+}
+
+function scrollToBottom() {
+    const container = document.getElementById('chat-messages');
+    container.scrollTop = container.scrollHeight;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Simple marked.js substitute if not loaded
+if (typeof marked === 'undefined') {
+    window.marked = {
+        parse: function(text) {
+            return text
+                .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+                .replace(/\n/g, '<br>');
+        }
+    };
+}
+</script>
+{% endblock %}

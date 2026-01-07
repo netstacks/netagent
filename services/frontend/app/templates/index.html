@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - NetAgent{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- Stats Cards -->
+<div class="row g-4 mb-4">
+    <div class="col-md-6 col-lg-3">
+        <div class="stat-card">
+            <div class="stat-icon blue">
+                <i class="fas fa-robot"></i>
+            </div>
+            <div class="stat-value" id="stat-agents">-</div>
+            <div class="stat-label">Active Agents</div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="stat-card">
+            <div class="stat-icon green">
+                <i class="fas fa-sitemap"></i>
+            </div>
+            <div class="stat-value" id="stat-workflows">-</div>
+            <div class="stat-label">Workflows</div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="stat-card">
+            <div class="stat-icon yellow">
+                <i class="fas fa-clipboard-check"></i>
+            </div>
+            <div class="stat-value" id="stat-approvals">-</div>
+            <div class="stat-label">Pending Approvals</div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="stat-card">
+            <div class="stat-icon purple">
+                <i class="fas fa-comments"></i>
+            </div>
+            <div class="stat-value" id="stat-sessions">-</div>
+            <div class="stat-label">Sessions Today</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- Quick Actions -->
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title">Quick Actions</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <a href="/agents/new" class="btn btn-primary">
+                        <i class="fas fa-plus me-2"></i>Create New Agent
+                    </a>
+                    <a href="/workflows/new" class="btn btn-outline-secondary">
+                        <i class="fas fa-diagram-project me-2"></i>Build Workflow
+                    </a>
+                    <a href="/knowledge" class="btn btn-outline-secondary">
+                        <i class="fas fa-book me-2"></i>Add Knowledge Base
+                    </a>
+                </div>
+
+                <hr class="my-4">
+
+                <h6 class="mb-3">Start Chat</h6>
+                <div id="quick-agents" class="d-flex flex-column gap-2">
+                    <div class="text-muted text-center py-3">
+                        <i class="fas fa-spinner fa-spin"></i> Loading agents...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Workflow Runs -->
+    <div class="col-lg-8">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Recent Activity</h5>
+                <a href="/audit" class="btn btn-sm btn-outline-secondary">View All</a>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Type</th>
+                                <th>Name</th>
+                                <th>Status</th>
+                                <th>User</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-activity">
+                            <tr>
+                                <td colspan="5" class="text-center text-muted py-4">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Agent Templates Section -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title">Agent Templates</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3" id="agent-templates">
+                    <div class="col-12 text-center text-muted py-4">
+                        <i class="fas fa-spinner fa-spin"></i> Loading templates...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', async function() {
+    // Load dashboard stats
+    try {
+        const stats = await apiClient.get('/api/stats/dashboard');
+        document.getElementById('stat-agents').textContent = stats.agents || 0;
+        document.getElementById('stat-workflows').textContent = stats.workflows || 0;
+        document.getElementById('stat-approvals').textContent = stats.pending_approvals || 0;
+        document.getElementById('stat-sessions').textContent = stats.sessions_today || 0;
+    } catch (err) {
+        console.error('Failed to load stats:', err);
+    }
+
+    // Load quick-access agents
+    try {
+        const agents = await apiClient.get('/api/agents?enabled=true&limit=5');
+        const container = document.getElementById('quick-agents');
+
+        if (agents.items && agents.items.length > 0) {
+            container.innerHTML = agents.items.map(agent => `
+                <a href="/agents/${agent.id}/chat" class="agent-card text-decoration-none">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="agent-icon" style="width: 36px; height: 36px; margin: 0;">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                        <div>
+                            <div class="agent-name">${agent.name}</div>
+                            <div class="agent-type">${agent.agent_type}</div>
+                        </div>
+                    </div>
+                </a>
+            `).join('');
+        } else {
+            container.innerHTML = `
+                <div class="text-center text-muted py-3">
+                    <p class="mb-2">No agents yet</p>
+                    <a href="/agents/new" class="btn btn-sm btn-primary">Create your first agent</a>
+                </div>
+            `;
+        }
+    } catch (err) {
+        console.error('Failed to load agents:', err);
+    }
+
+    // Load recent activity
+    try {
+        const activity = await apiClient.get('/api/audit?limit=10');
+        const tbody = document.getElementById('recent-activity');
+
+        if (activity.items && activity.items.length > 0) {
+            tbody.innerHTML = activity.items.map(item => `
+                <tr>
+                    <td>
+                        <span class="badge bg-secondary">${item.event_category}</span>
+                    </td>
+                    <td>${item.resource_name || '-'}</td>
+                    <td>
+                        <span class="badge bg-${getStatusColor(item.action)}">${item.action}</span>
+                    </td>
+                    <td>${item.user_email || 'System'}</td>
+                    <td>${formatTime(item.created_at)}</td>
+                </tr>
+            `).join('');
+        } else {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center text-muted py-4">
+                        No recent activity
+                    </td>
+                </tr>
+            `;
+        }
+    } catch (err) {
+        console.error('Failed to load activity:', err);
+    }
+
+    // Load agent templates
+    try {
+        const templates = await apiClient.get('/api/agents/templates');
+        const container = document.getElementById('agent-templates');
+
+        if (templates.items && templates.items.length > 0) {
+            container.innerHTML = templates.items.map(template => `
+                <div class="col-md-6 col-lg-3">
+                    <div class="agent-card" onclick="createFromTemplate(${template.id})">
+                        <div class="agent-icon">
+                            <i class="fas fa-${template.icon || 'robot'}"></i>
+                        </div>
+                        <div class="agent-name">${template.name}</div>
+                        <div class="agent-type">${template.agent_type}</div>
+                        <div class="agent-description">${template.description || ''}</div>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = `
+                <div class="col-12 text-center text-muted py-3">
+                    No templates available
+                </div>
+            `;
+        }
+    } catch (err) {
+        console.error('Failed to load templates:', err);
+    }
+});
+
+function getStatusColor(action) {
+    const colors = {
+        'create': 'success',
+        'update': 'info',
+        'delete': 'danger',
+        'execute': 'primary',
+        'approve': 'success',
+        'reject': 'danger'
+    };
+    return colors[action] || 'secondary';
+}
+
+function formatTime(timestamp) {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = now - date;
+
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+    return date.toLocaleDateString();
+}
+
+function createFromTemplate(templateId) {
+    window.location.href = `/agents/new?template=${templateId}`;
+}
+</script>
+{% endblock %}

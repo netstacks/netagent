@@ -1,0 +1,158 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v2.11
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - netagent
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: netagent
+      POSTGRES_USER: netagent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-netagent_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - netagent
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netagent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - netagent
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: services/frontend/Dockerfile
+    environment:
+      - API_BASE_URL=http://api:8001
+      - PYTHONUNBUFFERED=1
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.services.frontend.loadbalancer.server.port=8000"
+    volumes:
+      - ./static:/app/static:ro
+      - ./services/frontend/app/templates:/app/templates:ro
+    networks:
+      - netagent
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://netagent:${POSTGRES_PASSWORD:-netagent_dev}@postgres:5432/netagent
+      - REDIS_URL=redis://redis:6379/0
+      - APIGEE_CLIENT_ID=${APIGEE_CLIENT_ID}
+      - APIGEE_CLIENT_SECRET=${APIGEE_CLIENT_SECRET}
+      - APIGEE_TOKEN_URL=${APIGEE_TOKEN_URL}
+      - GEMINI_API_URL=${GEMINI_API_URL}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - SMTP_SERVER=${SMTP_SERVER:-localhost}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_FROM=${SMTP_FROM:-netagent@localhost}
+      - DEV_MODE=${DEV_MODE:-false}
+      - PYTHONUNBUFFERED=1
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.api.priority=10"
+      - "traefik.http.services.api.loadbalancer.server.port=8001"
+    networks:
+      - netagent
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    command: celery -A app.celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://netagent:${POSTGRES_PASSWORD:-netagent_dev}@postgres:5432/netagent
+      - REDIS_URL=redis://redis:6379/0
+      - APIGEE_CLIENT_ID=${APIGEE_CLIENT_ID}
+      - APIGEE_CLIENT_SECRET=${APIGEE_CLIENT_SECRET}
+      - APIGEE_TOKEN_URL=${APIGEE_TOKEN_URL}
+      - GEMINI_API_URL=${GEMINI_API_URL}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - PYTHONUNBUFFERED=1
+    networks:
+      - netagent
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    command: celery -A app.celery_app beat --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://netagent:${POSTGRES_PASSWORD:-netagent_dev}@postgres:5432/netagent
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONUNBUFFERED=1
+    networks:
+      - netagent
+    depends_on:
+      - worker
+
+  slack-bot:
+    build:
+      context: .
+      dockerfile: services/slack_bot/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://netagent:${POSTGRES_PASSWORD:-netagent_dev}@postgres:5432/netagent
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
+      - API_BASE_URL=http://api:8001
+      - PYTHONUNBUFFERED=1
+    networks:
+      - netagent
+    depends_on:
+      - api
+
+networks:
+  netagent:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
