@@ -13,6 +13,9 @@ from netagent_core.utils import audit_log, AuditEventType
 
 router = APIRouter()
 
+# REMOVED: All agents get all tools enabled by default
+# ALL_TOOLS = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email']
+
 
 # Pydantic models
 class AgentCreate(BaseModel):
@@ -29,6 +32,7 @@ class AgentCreate(BaseModel):
     allowed_device_patterns: List[str] = ["*"]
     mcp_server_ids: List[int] = []
     knowledge_base_ids: List[int] = []
+    allowed_handoff_agent_ids: Optional[List[int]] = None
     enabled: bool = True
 
 
@@ -45,6 +49,7 @@ class AgentUpdate(BaseModel):
     allowed_device_patterns: Optional[List[str]] = None
     mcp_server_ids: Optional[List[int]] = None
     knowledge_base_ids: Optional[List[int]] = None
+    allowed_handoff_agent_ids: Optional[List[int]] = None
     enabled: Optional[bool] = None
 
 
@@ -63,10 +68,21 @@ class AgentResponse(BaseModel):
     allowed_device_patterns: List[str]
     mcp_server_ids: List[int]
     knowledge_base_ids: List[int]
+    allowed_handoff_agent_ids: Optional[List[int]]
     enabled: bool
     created_by: Optional[int]
     created_at: datetime
     updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class HandoffTargetResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    agent_type: str
 
     class Config:
         from_attributes = True
@@ -128,6 +144,32 @@ async def list_agent_templates(
     }
 
 
+@router.get("/handoff-targets", response_model=dict)
+async def get_handoff_targets(
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+    exclude_agent_id: Optional[int] = Query(default=None),
+):
+    """Get agents available for handoff.
+
+    Returns enabled agents that can be handed off to.
+    Optionally excludes a specific agent (e.g., the current agent).
+    """
+    query = db.query(Agent).filter(
+        Agent.is_template == False,
+        Agent.enabled == True,
+    )
+
+    if exclude_agent_id:
+        query = query.filter(Agent.id != exclude_agent_id)
+
+    agents = query.order_by(Agent.name).all()
+
+    return {
+        "items": [HandoffTargetResponse.model_validate(a) for a in agents],
+    }
+
+
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(
     agent_id: int,
@@ -148,7 +190,12 @@ async def create_agent(
     db: Session = Depends(get_db),
     user: ALBUser = Depends(get_current_user),
 ):
-    """Create a new agent."""
+    """Create a new agent.
+
+    Note: Empty mcp_server_ids and knowledge_base_ids mean "use ALL available".
+    This ensures agents automatically get access to new resources when added.
+    """
+    # Use explicitly provided tools, knowledge bases, and MCP servers
     agent = Agent(
         name=data.name,
         description=data.description,
@@ -159,10 +206,11 @@ async def create_agent(
         max_tokens=data.max_tokens,
         max_iterations=data.max_iterations,
         autonomy_level=data.autonomy_level,
-        allowed_tools=data.allowed_tools,
+        allowed_tools=data.allowed_tools,  # Use provided tools
         allowed_device_patterns=data.allowed_device_patterns,
-        mcp_server_ids=data.mcp_server_ids,
-        knowledge_base_ids=data.knowledge_base_ids,
+        mcp_server_ids=data.mcp_server_ids,  # Use provided MCP servers
+        knowledge_base_ids=data.knowledge_base_ids,  # Use provided knowledge bases
+        allowed_handoff_agent_ids=data.allowed_handoff_agent_ids,
         enabled=data.enabled,
         created_by=user.id,
     )
@@ -192,13 +240,18 @@ async def update_agent(
     db: Session = Depends(get_db),
     user: ALBUser = Depends(get_current_user),
 ):
-    """Update an agent."""
+    """Update an agent.
+
+    Note: Empty mcp_server_ids and knowledge_base_ids mean "use ALL available".
+    """
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
     # Update fields
     update_data = data.model_dump(exclude_unset=True)
+
+    # No longer override tools/devices - use what's provided
     for key, value in update_data.items():
         setattr(agent, key, value)
 
@@ -256,7 +309,10 @@ async def duplicate_agent(
     db: Session = Depends(get_db),
     user: ALBUser = Depends(get_current_user),
 ):
-    """Duplicate an agent."""
+    """Duplicate an agent.
+
+    Note: Empty mcp_server_ids and knowledge_base_ids mean "use ALL available".
+    """
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -271,10 +327,11 @@ async def duplicate_agent(
         max_tokens=agent.max_tokens,
         max_iterations=agent.max_iterations,
         autonomy_level=agent.autonomy_level,
-        allowed_tools=agent.allowed_tools,
+        allowed_tools=agent.allowed_tools,  # Copy original tools
         allowed_device_patterns=agent.allowed_device_patterns,
-        mcp_server_ids=agent.mcp_server_ids,
-        knowledge_base_ids=agent.knowledge_base_ids,
+        mcp_server_ids=agent.mcp_server_ids,  # Copy original MCP servers
+        knowledge_base_ids=agent.knowledge_base_ids,  # Copy original knowledge bases
+        allowed_handoff_agent_ids=agent.allowed_handoff_agent_ids,
         enabled=False,
         created_by=user.id,
     )
@@ -284,3 +341,36 @@ async def duplicate_agent(
     db.refresh(new_agent)
 
     return AgentResponse.model_validate(new_agent)
+
+
+@router.get("/{agent_id}/handoff-targets", response_model=dict)
+async def get_agent_handoff_targets(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Get allowed handoff targets for a specific agent.
+
+    If the agent has allowed_handoff_agent_ids set, returns only those agents.
+    Otherwise, returns all enabled agents except itself.
+    """
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    query = db.query(Agent).filter(
+        Agent.is_template == False,
+        Agent.enabled == True,
+        Agent.id != agent_id,  # Exclude self
+    )
+
+    # If allowed_handoff_agent_ids is set, filter to only those
+    if agent.allowed_handoff_agent_ids:
+        query = query.filter(Agent.id.in_(agent.allowed_handoff_agent_ids))
+
+    agents = query.order_by(Agent.name).all()
+
+    return {
+        "items": [HandoffTargetResponse.model_validate(a) for a in agents],
+        "restricted": agent.allowed_handoff_agent_ids is not None,
+    }
