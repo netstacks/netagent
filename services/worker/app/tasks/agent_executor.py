@@ -96,11 +96,10 @@ def build_tools_for_agent(agent: Agent, db_session_factory, session_id: int):
     (since they require async operation).
 
     Note:
-        Empty knowledge_base_ids means "use ALL available knowledge bases".
-        This ensures agents automatically get access to new knowledge bases.
+        Empty knowledge_base_ids means "use no knowledge bases".
+        Resources must be explicitly configured per agent.
     """
     from netagent_core.tools import create_ssh_tool, create_knowledge_search_tool, create_email_tool
-    from netagent_core.db import KnowledgeBase
     import os
 
     tools = []
@@ -115,22 +114,12 @@ def build_tools_for_agent(agent: Agent, db_session_factory, session_id: int):
             encryption_key=encryption_key,
         ))
 
-    # Knowledge search tool - empty list means use ALL knowledge bases
-    if "search_knowledge" in allowed_tools:
-        knowledge_base_ids = agent.knowledge_base_ids
-        # If empty, get all knowledge bases
-        if not knowledge_base_ids:
-            with db_session_factory() as db:
-                all_kb = db.query(KnowledgeBase).all()
-                knowledge_base_ids = [kb.id for kb in all_kb]
-                if knowledge_base_ids:
-                    logger.info(f"Using all {len(knowledge_base_ids)} knowledge bases for background agent")
-
-        if knowledge_base_ids:
-            tools.append(create_knowledge_search_tool(
-                knowledge_base_ids=knowledge_base_ids,
-                db_session_factory=db_session_factory,
-            ))
+    # Knowledge search tool - only if knowledge bases are specified
+    if "search_knowledge" in allowed_tools and agent.knowledge_base_ids:
+        tools.append(create_knowledge_search_tool(
+            knowledge_base_ids=agent.knowledge_base_ids,
+            db_session_factory=db_session_factory,
+        ))
 
     # Email tool
     if "send_email" in allowed_tools:
