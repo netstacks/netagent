@@ -399,6 +399,112 @@ async def create_session(
     return SessionResponse.model_validate(session)
 
 
+@router.get("/sessions/live/stream")
+async def stream_live_sessions(
+    user: ALBUser = Depends(get_current_user),
+):
+    """SSE stream for live session updates.
+
+    Subscribes to the global sessions:live Redis channel and forwards events.
+    """
+    import redis
+    from netagent_core.redis_events import REDIS_URL, SESSIONS_LIVE_CHANNEL
+
+    async def event_generator():
+        """Generate SSE events from Redis pub/sub."""
+        # Create a separate Redis connection for subscription
+        try:
+            r = redis.from_url(REDIS_URL, decode_responses=True)
+            pubsub = r.pubsub()
+            pubsub.subscribe(SESSIONS_LIVE_CHANNEL)
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Redis connection failed'})}\n\n"
+            return
+
+        try:
+            # Send initial connection event
+            yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+
+            while True:
+                message = pubsub.get_message(timeout=1.0)
+                if message and message["type"] == "message":
+                    yield f"data: {message['data']}\n\n"
+
+                # Small sleep to prevent busy loop
+                await asyncio.sleep(0.1)
+
+        except asyncio.CancelledError:
+            pass
+        finally:
+            pubsub.unsubscribe(SESSIONS_LIVE_CHANNEL)
+            pubsub.close()
+            r.close()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+@router.get("/sessions/live")
+async def get_live_sessions(
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Get currently active/waiting sessions."""
+    from netagent_core.db import User, Approval
+
+    sessions = db.query(AgentSession).filter(
+        AgentSession.status.in_(["active", "running", "waiting_approval"])
+    ).order_by(AgentSession.created_at.desc()).all()
+
+    items = []
+    for session in sessions:
+        agent = db.query(Agent).filter(Agent.id == session.agent_id).first()
+        user_obj = db.query(User).filter(User.id == session.user_id).first() if session.user_id else None
+
+        # Get latest message for preview
+        latest_msg = db.query(AgentMessage).filter(
+            AgentMessage.session_id == session.id
+        ).order_by(AgentMessage.created_at.desc()).first()
+
+        # Get pending approval if waiting
+        pending_approval = None
+        if session.status == "waiting_approval":
+            approval = db.query(Approval).filter(
+                Approval.session_id == session.id,
+                Approval.status == "pending"
+            ).first()
+            if approval:
+                pending_approval = {
+                    "id": approval.id,
+                    "action_type": approval.action_type,
+                    "action_description": approval.action_description,
+                    "risk_level": approval.risk_level,
+                }
+
+        items.append({
+            "id": session.id,
+            "agent_id": session.agent_id,
+            "agent_name": agent.name if agent else "Unknown",
+            "status": session.status,
+            "trigger_type": session.trigger_type,
+            "user_email": user_obj.email if user_obj else None,
+            "message_count": session.message_count,
+            "tool_call_count": session.tool_call_count,
+            "created_at": session.created_at.isoformat(),
+            "latest_message": latest_msg.content[:200] if latest_msg and latest_msg.content else None,
+            "pending_approval": pending_approval,
+        })
+
+    return {"items": items, "count": len(items)}
+
+
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
 async def get_session(
     session_id: int,
