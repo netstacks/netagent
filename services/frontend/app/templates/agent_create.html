@@ -67,60 +67,6 @@
                 </div>
             </div>
 
-            <!-- Tools Card -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-tools me-2"></i>Tools</h5>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted small mb-3">Select the tools this agent can use</p>
-
-                    <h6 class="text-muted mb-2">Built-in Tools</h6>
-                    <div class="row g-2 mb-4">
-                        <div class="col-md-6">
-                            <div class="form-check card p-3">
-                                <input class="form-check-input" type="checkbox" id="tool-ssh" value="ssh_command">
-                                <label class="form-check-label w-100" for="tool-ssh">
-                                    <strong>SSH Command</strong>
-                                    <br><small class="text-muted">Execute read-only commands on network devices</small>
-                                </label>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-check card p-3">
-                                <input class="form-check-input" type="checkbox" id="tool-knowledge" value="search_knowledge">
-                                <label class="form-check-label w-100" for="tool-knowledge">
-                                    <strong>Search Knowledge</strong>
-                                    <br><small class="text-muted">Search indexed documentation and wiki pages</small>
-                                </label>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-check card p-3">
-                                <input class="form-check-input" type="checkbox" id="tool-handoff" value="handoff_to_agent">
-                                <label class="form-check-label w-100" for="tool-handoff">
-                                    <strong>Handoff to Agent</strong>
-                                    <br><small class="text-muted">Transfer conversation to another agent</small>
-                                </label>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-check card p-3">
-                                <input class="form-check-input" type="checkbox" id="tool-approval" value="request_approval">
-                                <label class="form-check-label w-100" for="tool-approval">
-                                    <strong>Request Approval</strong>
-                                    <br><small class="text-muted">Request human approval before proceeding</small>
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-
-                    <h6 class="text-muted mb-2">MCP Server Tools</h6>
-                    <div id="mcp-tools-container">
-                        <p class="text-muted small">Select MCP servers below to enable their tools</p>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <!-- Sidebar -->
@@ -134,11 +80,10 @@
                     <div class="mb-3">
                         <label class="form-label">Model</label>
                         <select class="form-select" id="agent-model">
-                            <option value="gemini-2.0-flash">Gemini 2.0 Flash (Fast)</option>
-                            <option value="gemini-2.0-pro">Gemini 2.0 Pro (Powerful)</option>
-                            <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-                            <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                            <!-- Models loaded dynamically from API -->
+                            <option value="">Loading models...</option>
                         </select>
+                        <div class="form-text">Select from approved Gemini models.</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Temperature: <span id="temp-value">0.1</span></label>
@@ -160,6 +105,76 @@
                                value="10" min="1" max="50">
                         <div class="form-text">Maximum tool calls per conversation turn</div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Tools Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-tools me-2"></i>Tools</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="tool-ssh_command" checked>
+                        <label class="form-check-label" for="tool-ssh_command">
+                            <strong>SSH Command</strong>
+                            <br><small class="text-muted">Execute commands on network devices</small>
+                        </label>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="tool-search_knowledge" checked>
+                        <label class="form-check-label" for="tool-search_knowledge">
+                            <strong>Knowledge Search</strong>
+                            <br><small class="text-muted">Search documentation and knowledge bases</small>
+                        </label>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="tool-handoff_to_agent" checked>
+                        <label class="form-check-label" for="tool-handoff_to_agent">
+                            <strong>Handoff to Agent</strong>
+                            <br><small class="text-muted">Transfer conversation to another agent</small>
+                        </label>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="tool-request_approval" checked>
+                        <label class="form-check-label" for="tool-request_approval">
+                            <strong>Request Approval</strong>
+                            <br><small class="text-muted">Request human approval for actions</small>
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="tool-send_email">
+                        <label class="form-check-label" for="tool-send_email">
+                            <strong>Send Email</strong>
+                            <br><small class="text-muted">Send email notifications</small>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Knowledge Bases Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-book me-2"></i>Knowledge Bases</h5>
+                </div>
+                <div class="card-body">
+                    <select class="form-select" id="agent-knowledge-bases" multiple size="4">
+                        <!-- Options populated dynamically -->
+                    </select>
+                    <div class="form-text">Select knowledge bases this agent can search. If none selected, agent cannot search knowledge. <br><small>Ctrl+click to select multiple.</small></div>
+                </div>
+            </div>
+
+            <!-- MCP Servers Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-plug me-2"></i>MCP Servers</h5>
+                </div>
+                <div class="card-body">
+                    <select class="form-select" id="agent-mcp-servers" multiple size="4">
+                        <!-- Options populated dynamically -->
+                    </select>
+                    <div class="form-text">Select MCP servers this agent can use. If none selected, no MCP tools available. <br><small>Ctrl+click to select multiple.</small></div>
                 </div>
             </div>
 
@@ -190,43 +205,6 @@
                             <br><small class="text-muted">Take actions autonomously</small>
                         </label>
                     </div>
-                </div>
-            </div>
-
-            <!-- Knowledge Bases Card -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-book me-2"></i>Knowledge Bases</h5>
-                </div>
-                <div class="card-body">
-                    <div id="knowledge-bases-list">
-                        <p class="text-muted small mb-0">Loading...</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- MCP Servers Card -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-plug me-2"></i>MCP Servers</h5>
-                </div>
-                <div class="card-body">
-                    <div id="mcp-servers-list">
-                        <p class="text-muted small mb-0">Loading...</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Device Access Card -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-hdd-network me-2"></i>Device Access</h5>
-                </div>
-                <div class="card-body">
-                    <label class="form-label">Allowed Device Patterns</label>
-                    <textarea class="form-control font-monospace" id="device-patterns" rows="3"
-                              placeholder="*&#10;router-*&#10;switch-nyc-*">*</textarea>
-                    <div class="form-text">One glob pattern per line. Use * as wildcard.</div>
                 </div>
             </div>
 
@@ -276,18 +254,21 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
 <script>
-const agentId = {{ agent.id if agent else 'null' }};
+const agentId = {{ agent_id if agent_id else 'null' }};
 const templateId = new URLSearchParams(window.location.search).get('template');
 
 let knowledgeBases = [];
 let mcpServers = [];
+let defaultModel = 'gemini-2.5-flash';
 
-document.addEventListener('DOMContentLoaded', function() {
-    loadKnowledgeBases();
-    loadMCPServers();
+document.addEventListener('DOMContentLoaded', async function() {
+    // Load models first, then other data in parallel
+    await loadModels();
+    await Promise.all([loadKnowledgeBases(), loadMCPServers()]);
 
+    // Load agent or template after multi-selects are populated
     if (agentId) {
         loadAgent();
     } else if (templateId) {
@@ -312,6 +293,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Form submission
     document.getElementById('agent-form').addEventListener('submit', saveAgent);
+
+    // Test Agent button
+    document.getElementById('btn-test-agent').addEventListener('click', testAgent);
 });
 
 async function loadAgent() {
@@ -325,24 +309,27 @@ async function loadAgent() {
 
 async function loadTemplate() {
     try {
-        const templates = await api.get('/api/agents/templates');
+        const response = await api.get('/api/agents/templates');
+        const templates = response.items || response || [];
         const template = templates.find(t => t.id == templateId);
         if (template) {
-            document.getElementById('agent-name').value = template.name + ' (Copy)';
+            document.getElementById('agent-name').value = template.name;
             document.getElementById('agent-type').value = template.agent_type;
             document.getElementById('agent-description').value = template.description || '';
             document.getElementById('agent-prompt').value = template.system_prompt || '';
-
-            // Set default tools
-            if (template.default_tools) {
-                template.default_tools.forEach(tool => {
-                    const checkbox = document.querySelector(`input[value="${tool}"]`);
-                    if (checkbox) checkbox.checked = true;
-                });
+            // Set model from template or default
+            const modelSelect = document.getElementById('agent-model');
+            if (template.default_model && modelSelect.querySelector(`option[value="${template.default_model}"]`)) {
+                modelSelect.value = template.default_model;
             }
+
+            showToast(`Loaded template: ${template.name}`, 'info');
+        } else {
+            showToast('Template not found', 'error');
         }
     } catch (error) {
         console.error('Failed to load template:', error);
+        showToast('Failed to load template', 'error');
     }
 }
 
@@ -351,7 +338,13 @@ function populateForm(agent) {
     document.getElementById('agent-type').value = agent.agent_type;
     document.getElementById('agent-description').value = agent.description || '';
     document.getElementById('agent-prompt').value = agent.system_prompt || '';
-    document.getElementById('agent-model').value = agent.model || 'gemini-2.0-flash';
+    // Set model from agent or use the default from settings
+    const modelSelect = document.getElementById('agent-model');
+    if (agent.model && modelSelect.querySelector(`option[value="${agent.model}"]`)) {
+        modelSelect.value = agent.model;
+    } else {
+        modelSelect.value = defaultModel;
+    }
     document.getElementById('agent-temperature').value = agent.temperature || 0.1;
     document.getElementById('temp-value').textContent = agent.temperature || 0.1;
     document.getElementById('agent-max-tokens').value = agent.max_tokens || 4096;
@@ -361,120 +354,129 @@ function populateForm(agent) {
     // Autonomy level
     document.querySelector(`input[name="autonomy"][value="${agent.autonomy_level || 'recommend'}"]`).checked = true;
 
-    // Tools
-    if (agent.allowed_tools) {
-        agent.allowed_tools.forEach(tool => {
-            const checkbox = document.querySelector(`input[value="${tool}"]`);
-            if (checkbox) checkbox.checked = true;
+    // Tools checkboxes - uncheck all first, then check the ones in allowed_tools
+    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email'];
+    toolIds.forEach(toolId => {
+        const checkbox = document.getElementById(`tool-${toolId}`);
+        if (checkbox) {
+            checkbox.checked = (agent.allowed_tools || []).includes(toolId);
+        }
+    });
+
+    // Knowledge bases multi-select
+    const kbSelect = document.getElementById('agent-knowledge-bases');
+    const agentKbIds = agent.knowledge_base_ids || [];
+    Array.from(kbSelect.options).forEach(option => {
+        option.selected = agentKbIds.includes(parseInt(option.value));
+    });
+
+    // MCP servers multi-select
+    const mcpSelect = document.getElementById('agent-mcp-servers');
+    const agentMcpIds = agent.mcp_server_ids || [];
+    Array.from(mcpSelect.options).forEach(option => {
+        option.selected = agentMcpIds.includes(parseInt(option.value));
+    });
+}
+
+async function loadModels() {
+    try {
+        const response = await api.get('/api/settings/models');
+        const models = response.models || [];
+        defaultModel = response.default || 'gemini-2.5-flash';
+
+        const select = document.getElementById('agent-model');
+        select.innerHTML = '';
+
+        // Group models by their group property
+        const groups = {};
+        models.forEach(model => {
+            if (!groups[model.group]) {
+                groups[model.group] = [];
+            }
+            groups[model.group].push(model);
         });
-    }
 
-    // Device patterns
-    if (agent.allowed_device_patterns) {
-        document.getElementById('device-patterns').value = agent.allowed_device_patterns.join('\n');
-    }
+        // Create optgroups
+        for (const [groupName, groupModels] of Object.entries(groups)) {
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = groupName;
 
-    // Knowledge bases and MCP servers will be checked after loading
-    setTimeout(() => {
-        if (agent.knowledge_base_ids) {
-            agent.knowledge_base_ids.forEach(id => {
-                const checkbox = document.querySelector(`input[name="knowledge-base"][value="${id}"]`);
-                if (checkbox) checkbox.checked = true;
+            groupModels.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.value;
+                option.textContent = model.label;
+                if (model.value === defaultModel) {
+                    option.selected = true;
+                }
+                optgroup.appendChild(option);
             });
+
+            select.appendChild(optgroup);
         }
-        if (agent.mcp_server_ids) {
-            agent.mcp_server_ids.forEach(id => {
-                const checkbox = document.querySelector(`input[name="mcp-server"][value="${id}"]`);
-                if (checkbox) checkbox.checked = true;
-            });
-        }
-    }, 500);
+    } catch (error) {
+        console.error('Failed to load models:', error);
+        // Fallback to a basic default
+        const select = document.getElementById('agent-model');
+        select.innerHTML = '<option value="gemini-2.5-flash" selected>Gemini 2.5 Flash</option>';
+    }
 }
 
 async function loadKnowledgeBases() {
     try {
-        knowledgeBases = await api.get('/api/knowledge');
-        renderKnowledgeBases();
+        const response = await api.get('/api/knowledge');
+        knowledgeBases = response.items || response || [];
+
+        // Populate the multi-select
+        const select = document.getElementById('agent-knowledge-bases');
+        select.innerHTML = '';
+        knowledgeBases.forEach(kb => {
+            const option = document.createElement('option');
+            option.value = kb.id;
+            option.textContent = kb.name;
+            select.appendChild(option);
+        });
     } catch (error) {
-        document.getElementById('knowledge-bases-list').innerHTML =
-            '<p class="text-muted small mb-0">Failed to load knowledge bases</p>';
+        console.error('Failed to load knowledge bases:', error);
     }
 }
 
 async function loadMCPServers() {
     try {
-        mcpServers = await api.get('/api/mcp/servers');
-        renderMCPServers();
+        const response = await api.get('/api/mcp/servers');
+        mcpServers = response.items || response || [];
+
+        // Populate the multi-select
+        const select = document.getElementById('agent-mcp-servers');
+        select.innerHTML = '';
+        mcpServers.forEach(server => {
+            const option = document.createElement('option');
+            option.value = server.id;
+            option.textContent = server.name;
+            select.appendChild(option);
+        });
     } catch (error) {
-        document.getElementById('mcp-servers-list').innerHTML =
-            '<p class="text-muted small mb-0">Failed to load MCP servers</p>';
+        console.error('Failed to load MCP servers:', error);
     }
 }
 
-function renderKnowledgeBases() {
-    const container = document.getElementById('knowledge-bases-list');
-    if (knowledgeBases.length === 0) {
-        container.innerHTML = '<p class="text-muted small mb-0">No knowledge bases configured</p>';
-        return;
-    }
-
-    container.innerHTML = knowledgeBases.map(kb => `
-        <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" name="knowledge-base"
-                   id="kb-${kb.id}" value="${kb.id}">
-            <label class="form-check-label" for="kb-${kb.id}">
-                ${escapeHtml(kb.name)}
-                <br><small class="text-muted">${kb.document_count || 0} documents</small>
-            </label>
-        </div>
-    `).join('');
-}
-
-function renderMCPServers() {
-    const container = document.getElementById('mcp-servers-list');
-    if (mcpServers.length === 0) {
-        container.innerHTML = '<p class="text-muted small mb-0">No MCP servers configured</p>';
-        return;
-    }
-
-    container.innerHTML = mcpServers.map(server => `
-        <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" name="mcp-server"
-                   id="mcp-${server.id}" value="${server.id}">
-            <label class="form-check-label" for="mcp-${server.id}">
-                ${escapeHtml(server.name)}
-                <br><small class="text-muted">${(server.tools || []).length} tools</small>
-            </label>
-        </div>
-    `).join('');
-}
 
 async function saveAgent(e) {
     e.preventDefault();
 
-    // Collect tools
-    const allowedTools = [];
-    document.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
-        if (cb.value && !cb.name) allowedTools.push(cb.value);
+    // Collect checked tools from checkboxes
+    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email'];
+    const allowedTools = toolIds.filter(toolId => {
+        const checkbox = document.getElementById(`tool-${toolId}`);
+        return checkbox && checkbox.checked;
     });
 
-    // Collect knowledge bases
-    const knowledgeBaseIds = [];
-    document.querySelectorAll('input[name="knowledge-base"]:checked').forEach(cb => {
-        knowledgeBaseIds.push(parseInt(cb.value));
-    });
+    // Collect selected knowledge base IDs from multi-select
+    const kbSelect = document.getElementById('agent-knowledge-bases');
+    const knowledgeBaseIds = Array.from(kbSelect.selectedOptions).map(opt => parseInt(opt.value));
 
-    // Collect MCP servers
-    const mcpServerIds = [];
-    document.querySelectorAll('input[name="mcp-server"]:checked').forEach(cb => {
-        mcpServerIds.push(parseInt(cb.value));
-    });
-
-    // Collect device patterns
-    const devicePatterns = document.getElementById('device-patterns').value
-        .split('\n')
-        .map(p => p.trim())
-        .filter(p => p);
+    // Collect selected MCP server IDs from multi-select
+    const mcpSelect = document.getElementById('agent-mcp-servers');
+    const mcpServerIds = Array.from(mcpSelect.selectedOptions).map(opt => parseInt(opt.value));
 
     const data = {
         name: document.getElementById('agent-name').value,
@@ -489,7 +491,7 @@ async function saveAgent(e) {
         allowed_tools: allowedTools,
         knowledge_base_ids: knowledgeBaseIds,
         mcp_server_ids: mcpServerIds,
-        allowed_device_patterns: devicePatterns,
+        allowed_device_patterns: ['*'],  // All devices accessible
         enabled: document.getElementById('agent-enabled').checked
     };
 
@@ -504,6 +506,63 @@ async function saveAgent(e) {
         }
     } catch (error) {
         showToast('Failed to save agent', 'error');
+    }
+}
+
+async function testAgent() {
+    // If agent already exists, go to chat
+    if (agentId) {
+        window.location.href = `/agents/${agentId}/chat`;
+        return;
+    }
+
+    // For new agents, save first then redirect to chat
+    const name = document.getElementById('agent-name').value;
+    if (!name) {
+        showToast('Please enter an agent name before testing', 'warning');
+        document.getElementById('agent-name').focus();
+        return;
+    }
+
+    // Collect checked tools from checkboxes
+    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email'];
+    const allowedTools = toolIds.filter(toolId => {
+        const checkbox = document.getElementById(`tool-${toolId}`);
+        return checkbox && checkbox.checked;
+    });
+
+    // Collect selected knowledge base IDs from multi-select
+    const kbSelect = document.getElementById('agent-knowledge-bases');
+    const knowledgeBaseIds = Array.from(kbSelect.selectedOptions).map(opt => parseInt(opt.value));
+
+    // Collect selected MCP server IDs from multi-select
+    const mcpSelect = document.getElementById('agent-mcp-servers');
+    const mcpServerIds = Array.from(mcpSelect.selectedOptions).map(opt => parseInt(opt.value));
+
+    const data = {
+        name: document.getElementById('agent-name').value,
+        agent_type: document.getElementById('agent-type').value,
+        description: document.getElementById('agent-description').value,
+        system_prompt: document.getElementById('agent-prompt').value,
+        model: document.getElementById('agent-model').value,
+        temperature: parseFloat(document.getElementById('agent-temperature').value),
+        max_tokens: parseInt(document.getElementById('agent-max-tokens').value),
+        max_iterations: parseInt(document.getElementById('agent-max-iterations').value),
+        autonomy_level: document.querySelector('input[name="autonomy"]:checked').value,
+        allowed_tools: allowedTools,
+        knowledge_base_ids: knowledgeBaseIds,
+        mcp_server_ids: mcpServerIds,
+        allowed_device_patterns: ['*'],
+        enabled: document.getElementById('agent-enabled').checked
+    };
+
+    try {
+        showToast('Saving agent...', 'info');
+        const result = await api.post('/api/agents', data);
+        showToast('Agent created! Redirecting to chat...', 'success');
+        window.location.href = `/agents/${result.id}/chat`;
+    } catch (error) {
+        showToast('Failed to save agent before testing', 'error');
     }
 }
 
