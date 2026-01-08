@@ -1,7 +1,9 @@
-"""Chat/Agent session routes with SSE streaming."""
+"""Chat/Agent session routes with SSE streaming and tool execution."""
 
 import json
 import asyncio
+import os
+import logging
 from datetime import datetime
 from typing import Optional, List
 
@@ -13,9 +15,60 @@ from sqlalchemy.orm import Session
 from netagent_core.db import get_db, Agent, AgentSession, AgentMessage, AgentAction
 from netagent_core.auth import get_current_user, ALBUser
 from netagent_core.utils import audit_log, AuditEventType
-from netagent_core.llm import GeminiClient
+from netagent_core.redis_events import set_cancel_flag, publish_live_session_event
+from netagent_core.llm import GeminiClient, AgentExecutor, ToolDefinition
+from netagent_core.tools import create_ssh_tool, create_knowledge_search_tool
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def build_specialist_prompt(db: Session, current_agent_id: int, allowed_agent_ids: list = None) -> str:
+    """Build system prompt section listing available specialist agents for handoff.
+
+    Args:
+        db: Database session
+        current_agent_id: ID of the current agent (to exclude from list)
+        allowed_agent_ids: If set, only include these agent IDs
+
+    Returns:
+        String to append to system prompt, or empty string if no specialists available
+    """
+    query = db.query(Agent).filter(
+        Agent.is_template == False,
+        Agent.enabled == True,
+        Agent.id != current_agent_id,
+    )
+
+    if allowed_agent_ids:
+        query = query.filter(Agent.id.in_(allowed_agent_ids))
+
+    specialists = query.order_by(Agent.name).all()
+
+    if not specialists:
+        return ""
+
+    lines = [
+        "## Available Specialist Agents",
+        "",
+        "You can delegate tasks to the following specialist agents using the `handoff_to_agent` tool:",
+        "",
+    ]
+
+    for agent in specialists:
+        desc = agent.description or f"{agent.agent_type} specialist"
+        lines.append(f"- **{agent.name}** (ID: {agent.id}): {desc}")
+
+    lines.extend([
+        "",
+        "When you identify a task that matches a specialist's expertise, hand it off using:",
+        "```",
+        'handoff_to_agent(target_agent_id=<id>, task_summary="Brief description of what to do", context={...})',
+        "```",
+    ])
+
+    return "\n".join(lines)
 
 
 class SessionCreate(BaseModel):
@@ -75,6 +128,234 @@ class ActionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+def build_tools_for_agent(
+    agent: Agent,
+    db_session_factory=None,
+) -> List[ToolDefinition]:
+    """Build tool definitions based on agent configuration.
+
+    Args:
+        agent: Agent configuration
+        db_session_factory: Factory for DB sessions
+
+    Returns:
+        List of ToolDefinition objects
+    """
+    config = {
+        "allowed_tools": agent.allowed_tools or [],
+        "allowed_device_patterns": agent.allowed_device_patterns or ["*"],
+        "knowledge_base_ids": agent.knowledge_base_ids or [],
+        "mcp_server_ids": agent.mcp_server_ids or [],
+    }
+    return build_tools_for_agent_config(config, db_session_factory)
+
+
+def build_tools_for_agent_config(
+    config: dict,
+    db_session_factory=None,
+) -> List[ToolDefinition]:
+    """Build tool definitions based on agent configuration dict.
+
+    Args:
+        config: Dict with allowed_tools, allowed_device_patterns, knowledge_base_ids, mcp_server_ids
+        db_session_factory: Factory for DB sessions
+
+    Returns:
+        List of ToolDefinition objects
+    """
+    tools = []
+    encryption_key = os.getenv("ENCRYPTION_KEY")
+
+    # SSH command tool
+    if "ssh_command" in config.get("allowed_tools", []):
+        tools.append(create_ssh_tool(
+            allowed_device_patterns=config.get("allowed_device_patterns", ["*"]),
+            db_session_factory=db_session_factory,
+            encryption_key=encryption_key,
+        ))
+
+    # Knowledge search tool
+    if "search_knowledge" in config.get("allowed_tools", []) and config.get("knowledge_base_ids"):
+        tools.append(create_knowledge_search_tool(
+            knowledge_base_ids=config["knowledge_base_ids"],
+            db_session_factory=db_session_factory,
+        ))
+
+    # Email tool
+    if "send_email" in config.get("allowed_tools", []):
+        from netagent_core.tools import create_email_tool
+        tools.append(create_email_tool())
+        logger.info("Added send_email tool")
+    else:
+        logger.debug(f"send_email not in allowed_tools: {config.get('allowed_tools', [])}")
+
+    return tools
+
+
+async def build_tools_for_agent_config_async(
+    config: dict,
+    db_session_factory=None,
+    session_id: int = None,
+    event_callback=None,
+    handoff_depth: int = 0,
+) -> List[ToolDefinition]:
+    """Build tool definitions including MCP tools and handoff tool (async version).
+
+    Args:
+        config: Dict with allowed_tools, allowed_device_patterns, knowledge_base_ids, mcp_server_ids
+        db_session_factory: Factory for DB sessions
+        session_id: Current session ID (needed for handoff tool)
+        event_callback: Async callback to emit events (for handoff tool)
+        handoff_depth: Current nesting depth for handoffs
+
+    Returns:
+        List of ToolDefinition objects
+
+    Note:
+        Empty mcp_server_ids or knowledge_base_ids means "use ALL available".
+        This ensures agents automatically get access to new MCP servers and knowledge bases.
+    """
+    from netagent_core.db import MCPServer, KnowledgeBase
+
+    # Resolve "all" for MCP servers and knowledge bases if lists are empty
+    # Empty list = use all available (auto-include new resources)
+    if db_session_factory:
+        with db_session_factory() as db:
+            # Empty mcp_server_ids = use all enabled MCP servers
+            if not config.get("mcp_server_ids"):
+                all_mcp = db.query(MCPServer).filter(MCPServer.enabled == True).all()
+                config["mcp_server_ids"] = [s.id for s in all_mcp]
+                if config["mcp_server_ids"]:
+                    logger.info(f"Using all {len(config['mcp_server_ids'])} enabled MCP servers")
+
+            # Empty knowledge_base_ids = use all knowledge bases
+            if not config.get("knowledge_base_ids"):
+                all_kb = db.query(KnowledgeBase).all()
+                config["knowledge_base_ids"] = [kb.id for kb in all_kb]
+                if config["knowledge_base_ids"]:
+                    logger.info(f"Using all {len(config['knowledge_base_ids'])} knowledge bases")
+
+    # Get sync tools first (now with populated knowledge_base_ids)
+    tools = build_tools_for_agent_config(config, db_session_factory)
+
+    # Add handoff tool if enabled and session context available
+    if "handoff_to_agent" in config.get("allowed_tools", []) and session_id and event_callback:
+        from netagent_core.tools import create_handoff_tool
+
+        handoff_tool = create_handoff_tool(
+            db_session_factory=db_session_factory,
+            parent_session_id=session_id,
+            event_callback=event_callback,
+            current_depth=handoff_depth,
+            allowed_agent_ids=config.get("allowed_handoff_agent_ids"),
+        )
+        tools.append(ToolDefinition(
+            name=handoff_tool.name,
+            description=handoff_tool.description,
+            parameters=handoff_tool.parameters,
+            handler=handoff_tool.execute,
+            requires_approval=handoff_tool.requires_approval,
+            risk_level=handoff_tool.risk_level,
+        ))
+        logger.info("Added handoff_to_agent tool")
+
+    # Add approval tool if enabled and session context available
+    if "request_approval" in config.get("allowed_tools", []) and session_id:
+        from netagent_core.tools import create_approval_tool
+
+        approval_tool = create_approval_tool(
+            db_session_factory=db_session_factory,
+            session_id=session_id,
+            event_callback=event_callback,
+        )
+        tools.append(approval_tool)
+        logger.info("Added request_approval tool")
+
+    # Add MCP tools if configured
+    mcp_server_ids = config.get("mcp_server_ids", [])
+    if mcp_server_ids and db_session_factory:
+        from netagent_core.tools import load_mcp_tools_for_agent
+
+        try:
+            mcp_tools = await load_mcp_tools_for_agent(
+                mcp_server_ids=mcp_server_ids,
+                db_session_factory=db_session_factory,
+            )
+            tools.extend(mcp_tools)
+            logger.info(f"Loaded {len(mcp_tools)} MCP tools")
+        except Exception as e:
+            logger.error(f"Failed to load MCP tools: {e}")
+
+    return tools
+
+
+class SessionListResponse(BaseModel):
+    id: int
+    agent_id: int
+    agent_name: Optional[str] = None
+    status: str
+    trigger_type: Optional[str]
+    message_count: int
+    tool_call_count: int
+    token_count: int
+    user_id: Optional[int]
+    user_email: Optional[str] = None
+    created_at: datetime
+    completed_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("/sessions", response_model=dict)
+async def list_sessions(
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+    status: Optional[str] = Query(default=None, description="Filter by status (active, completed)"),
+    agent_id: Optional[int] = Query(default=None, description="Filter by agent ID"),
+    limit: int = Query(default=50, le=200),
+    offset: int = 0,
+):
+    """List all chat sessions with filtering options."""
+    from netagent_core.db import User
+
+    query = db.query(AgentSession).join(Agent, AgentSession.agent_id == Agent.id)
+
+    if status:
+        query = query.filter(AgentSession.status == status)
+    if agent_id:
+        query = query.filter(AgentSession.agent_id == agent_id)
+
+    total = query.count()
+    sessions = query.order_by(AgentSession.created_at.desc()).offset(offset).limit(limit).all()
+
+    # Build response with agent names and user emails
+    items = []
+    for session in sessions:
+        agent = db.query(Agent).filter(Agent.id == session.agent_id).first()
+        user_obj = db.query(User).filter(User.id == session.user_id).first() if session.user_id else None
+
+        items.append(SessionListResponse(
+            id=session.id,
+            agent_id=session.agent_id,
+            agent_name=agent.name if agent else None,
+            status=session.status,
+            trigger_type=session.trigger_type,
+            message_count=session.message_count,
+            tool_call_count=session.tool_call_count,
+            token_count=session.token_count,
+            user_id=session.user_id,
+            user_email=user_obj.email if user_obj else None,
+            created_at=session.created_at,
+            completed_at=session.completed_at,
+        ))
+
+    return {
+        "items": items,
+        "total": total,
+    }
 
 
 @router.post("/sessions", response_model=SessionResponse)
@@ -207,78 +488,228 @@ async def send_message(
     session.message_count += 1
     db.commit()
 
+    # Get database session factory for tools
+    from netagent_core.db import get_db_context
+    db_session_factory = get_db_context
+
+    # Extract agent configuration before starting async generator
+    # (prevents SQLAlchemy session detachment issues)
+    agent_config = {
+        "model": agent.model,
+        "system_prompt": agent.system_prompt,
+        "max_iterations": agent.max_iterations,
+        "temperature": agent.temperature,
+        "max_tokens": agent.max_tokens,
+        "allowed_tools": agent.allowed_tools or [],
+        "allowed_device_patterns": agent.allowed_device_patterns or ["*"],
+        "knowledge_base_ids": agent.knowledge_base_ids or [],
+        "mcp_server_ids": agent.mcp_server_ids or [],
+        "allowed_handoff_agent_ids": agent.allowed_handoff_agent_ids,
+    }
+    logger.info(f"Agent config allowed_tools: {agent_config['allowed_tools']}")
+
+    # If handoff is enabled, build list of available specialists for system prompt
+    if "handoff_to_agent" in agent_config["allowed_tools"]:
+        specialist_info = build_specialist_prompt(db, agent.id, agent.allowed_handoff_agent_ids)
+        if specialist_info:
+            agent_config["system_prompt"] = agent_config["system_prompt"] + "\n\n" + specialist_info
+
+    # Create event queue for handoff tool events
+    event_queue = asyncio.Queue()
+
+    # Get conversation history for context (before generator)
+    history_query = db.query(AgentMessage).filter(
+        AgentMessage.session_id == session_id,
+        AgentMessage.role.in_(["user", "assistant"])
+    ).order_by(AgentMessage.created_at).all()
+
+    history_messages = []
+    for msg in history_query[:-1]:  # Exclude the message we just added
+        if msg.content:
+            history_messages.append({
+                "role": msg.role,
+                "content": msg.content,
+            })
+
     async def generate_response():
-        """Generate streaming response."""
+        """Generate streaming response using agent executor."""
+        nonlocal db
+
+        # Event callback for handoff tool - puts events on queue
+        async def emit_event(event):
+            await event_queue.put(event)
+
         try:
-            # Get conversation history
-            messages = db.query(AgentMessage).filter(
-                AgentMessage.session_id == session_id
-            ).order_by(AgentMessage.created_at).all()
-
-            # Build message list for LLM
-            llm_messages = [
-                {"role": "system", "content": agent.system_prompt}
-            ]
-            for msg in messages:
-                if msg.role in ["user", "assistant"]:
-                    llm_messages.append({
-                        "role": msg.role,
-                        "content": msg.content or "",
-                    })
-
             # Create Gemini client
             try:
-                client = GeminiClient(model=agent.model)
+                client = GeminiClient(model=agent_config["model"])
             except Exception as e:
+                logger.error(f"Failed to create Gemini client: {e}")
                 yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
                 return
 
-            # Stream response
+            # Build tools based on agent configuration (including MCP and handoff tools)
+            tools = await build_tools_for_agent_config_async(
+                agent_config,
+                db_session_factory,
+                session_id=session_id,
+                event_callback=emit_event,
+            )
+
+            # Create agent executor
+            executor = AgentExecutor(
+                client=client,
+                system_prompt=agent_config["system_prompt"],
+                tools=tools,
+                max_iterations=agent_config["max_iterations"],
+                temperature=agent_config["temperature"],
+                max_tokens=agent_config["max_tokens"],
+            )
+
+            # Add history to executor
+            executor.messages = history_messages
+
+            # Track accumulated content and actions (to save in batch at end)
             full_content = ""
+            total_tokens = 0
+            tool_call_count = 0
+            pending_actions = []  # Collect actions to save at end
 
-            # Send thinking event
-            yield f"data: {json.dumps({'type': 'thinking', 'content': 'Processing your request...'})}\n\n"
+            # Helper to drain handoff events from queue
+            async def drain_handoff_events():
+                """Yield any pending handoff events from the queue."""
+                events_to_yield = []
+                while not event_queue.empty():
+                    try:
+                        handoff_event = event_queue.get_nowait()
+                        events_to_yield.append(handoff_event)
+                    except asyncio.QueueEmpty:
+                        break
+                return events_to_yield
 
-            try:
-                response = await client.achat(
-                    messages=llm_messages,
-                    temperature=agent.temperature,
-                    max_tokens=agent.max_tokens,
-                )
+            # Run agent and stream events
+            async for event in executor.run(data.content):
+                # First, drain any pending handoff events (emitted during tool execution)
+                for handoff_event in await drain_handoff_events():
+                    event_data = {
+                        "type": handoff_event.event_type,
+                        **handoff_event.data
+                    }
+                    yield f"data: {json.dumps(event_data)}\n\n"
 
-                if response.content:
-                    full_content = response.content
-                    # Send content in chunks for streaming effect
+                if event.event_type == "thinking":
+                    yield f"data: {json.dumps({'type': 'thinking', 'content': event.data.get('message', 'Processing...')})}\n\n"
+
+                elif event.event_type == "reasoning":
+                    # Agent's reasoning/thought process
+                    reasoning = event.data.get("content", "")
+                    yield f"data: {json.dumps({'type': 'reasoning', 'content': reasoning})}\n\n"
+
+                    # Queue action for later save
+                    pending_actions.append({
+                        "action_type": "thought",
+                        "reasoning": reasoning,
+                    })
+
+                elif event.event_type == "tool_call":
+                    tool_data = {
+                        "type": "tool_call",
+                        "name": event.data.get("name"),
+                        "arguments": event.data.get("arguments"),
+                        "risk_level": event.data.get("risk_level", "low"),
+                    }
+                    yield f"data: {json.dumps(tool_data)}\n\n"
+
+                    # Queue action for later save
+                    pending_actions.append({
+                        "action_type": "tool_call",
+                        "tool_name": event.data.get("name"),
+                        "tool_input": event.data.get("arguments"),
+                        "risk_level": event.data.get("risk_level"),
+                        "requires_approval": event.data.get("requires_approval", False),
+                        "status": "running",
+                    })
+                    tool_call_count += 1
+
+                elif event.event_type == "tool_result":
+                    result_data = {
+                        "type": "tool_result",
+                        "name": event.data.get("name"),
+                        "result": event.data.get("result"),
+                        "error": event.data.get("error"),
+                        "duration_ms": event.data.get("duration_ms"),
+                    }
+                    yield f"data: {json.dumps(result_data)}\n\n"
+
+                    # Queue action for later save
+                    pending_actions.append({
+                        "action_type": "tool_result",
+                        "tool_name": event.data.get("name"),
+                        "tool_output": {"result": event.data.get("result")} if event.data.get("result") else None,
+                        "error_message": event.data.get("error"),
+                        "duration_ms": event.data.get("duration_ms"),
+                        "status": "completed" if not event.data.get("error") else "failed",
+                    })
+
+                elif event.event_type == "content":
+                    content = event.data.get("content", "")
+                    full_content += content
+
+                    # Stream content in chunks for better UX
                     chunk_size = 50
-                    for i in range(0, len(full_content), chunk_size):
-                        chunk = full_content[i:i+chunk_size]
+                    for i in range(0, len(content), chunk_size):
+                        chunk = content[i:i+chunk_size]
                         yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
-                        await asyncio.sleep(0.02)
+                        await asyncio.sleep(0.01)
 
-                # Handle tool calls if any
-                if response.has_tool_calls:
-                    for tc in response.tool_calls:
-                        yield f"data: {json.dumps({'type': 'tool_call', 'name': tc.name, 'arguments': tc.arguments})}\n\n"
+                elif event.event_type == "done":
+                    total_tokens = event.data.get("usage", {}).get("total_tokens", 0)
+                    yield f"data: {json.dumps({'type': 'done', 'usage': event.data.get('usage', {})})}\n\n"
 
-                # Send completion event
-                yield f"data: {json.dumps({'type': 'done', 'usage': response.usage})}\n\n"
+                elif event.event_type == "error":
+                    error = event.data.get("error", "Unknown error")
+                    yield f"data: {json.dumps({'type': 'error', 'error': error})}\n\n"
+
+                    # Queue error action for later save
+                    pending_actions.append({
+                        "action_type": "error",
+                        "error_message": error,
+                        "status": "failed",
+                    })
+
+                elif event.event_type == "approval_required":
+                    yield f"data: {json.dumps({'type': 'approval_required', 'tool_name': event.data.get('tool_name'), 'arguments': event.data.get('arguments'), 'risk_level': event.data.get('risk_level')})}\n\n"
+
+            # Save all data using a fresh DB session
+            with db_session_factory() as fresh_db:
+                # Save pending actions
+                for action_data in pending_actions:
+                    action = AgentAction(session_id=session_id, **action_data)
+                    fresh_db.add(action)
 
                 # Save assistant message
-                assistant_message = AgentMessage(
-                    session_id=session_id,
-                    role="assistant",
-                    content=full_content,
-                    token_count=response.usage.get("completion_tokens", 0),
-                )
-                db.add(assistant_message)
-                session.message_count += 1
-                session.token_count += response.usage.get("total_tokens", 0)
-                db.commit()
+                if full_content:
+                    assistant_message = AgentMessage(
+                        session_id=session_id,
+                        role="assistant",
+                        content=full_content,
+                        token_count=total_tokens,
+                    )
+                    fresh_db.add(assistant_message)
 
-            except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+                # Update session stats
+                fresh_session = fresh_db.query(AgentSession).filter(
+                    AgentSession.id == session_id
+                ).first()
+                if fresh_session:
+                    fresh_session.message_count += 1
+                    fresh_session.token_count += total_tokens
+                    fresh_session.tool_call_count += tool_call_count
+
+                fresh_db.commit()
 
         except Exception as e:
+            logger.error(f"Chat error: {e}", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
 
     return StreamingResponse(
@@ -287,6 +718,7 @@ async def send_message(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         }
     )
 
@@ -319,3 +751,108 @@ async def stop_session(
     )
 
     return {"message": "Session stopped"}
+
+
+@router.post("/sessions/{session_id}/cancel")
+async def cancel_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Cancel a running or waiting session.
+
+    Sets a Redis flag that the worker checks during execution.
+    """
+    session = db.query(AgentSession).filter(AgentSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.status not in ("active", "running", "waiting_approval"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Session cannot be cancelled (status: {session.status})"
+        )
+
+    # Set cancel flag in Redis for worker to check
+    set_cancel_flag(session_id)
+
+    # Update session status
+    session.status = "cancelled"
+    session.completed_at = datetime.utcnow()
+    db.commit()
+
+    # Publish event for frontend
+    publish_live_session_event("session_cancelled", {
+        "session_id": session_id,
+        "cancelled_by": user.email,
+    })
+
+    # Audit log
+    agent = db.query(Agent).filter(Agent.id == session.agent_id).first()
+    audit_log(
+        db,
+        AuditEventType.AGENT_CHAT_COMPLETED,
+        user=user,
+        resource_type="agent_session",
+        resource_id=session.id,
+        resource_name=agent.name if agent else "Unknown",
+        action="cancel",
+        details={"cancelled_by": user.email},
+    )
+
+    return {"message": "Session cancelled", "session_id": session_id}
+
+
+@router.get("/available-tools")
+async def get_available_tools(
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Get list of available tools for agents."""
+    from netagent_core.db import MCPServer
+
+    # Built-in tools
+    builtin_tools = [
+        {
+            "name": "ssh_command",
+            "description": "Execute read-only SSH commands on network devices",
+            "category": "network",
+            "requires_config": ["allowed_device_patterns"],
+        },
+        {
+            "name": "search_knowledge",
+            "description": "Search knowledge bases for relevant documentation",
+            "category": "knowledge",
+            "requires_config": ["knowledge_base_ids"],
+        },
+        {
+            "name": "handoff_to_agent",
+            "description": "Hand off tasks to specialist agents for focused problem solving",
+            "category": "orchestration",
+            "requires_config": [],
+        },
+    ]
+
+    # Get MCP servers with their tools
+    mcp_servers = db.query(MCPServer).filter(MCPServer.enabled == True).all()
+    mcp_tools = []
+
+    for server in mcp_servers:
+        for tool in (server.tools or []):
+            mcp_tools.append({
+                "name": f"mcp_{server.name}_{tool.get('name', 'unknown')}",
+                "description": tool.get("description", "MCP tool"),
+                "category": "mcp",
+                "mcp_server_id": server.id,
+                "mcp_server_name": server.name,
+                "original_name": tool.get("name"),
+            })
+
+    return {
+        "tools": builtin_tools,
+        "mcp_tools": mcp_tools,
+        "mcp_servers": [
+            {"id": s.id, "name": s.name, "health_status": s.health_status}
+            for s in mcp_servers
+        ],
+    }
