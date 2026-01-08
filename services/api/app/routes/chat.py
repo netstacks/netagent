@@ -214,30 +214,13 @@ async def build_tools_for_agent_config_async(
         List of ToolDefinition objects
 
     Note:
-        Empty mcp_server_ids or knowledge_base_ids means "use ALL available".
-        This ensures agents automatically get access to new MCP servers and knowledge bases.
+        Empty mcp_server_ids or knowledge_base_ids means "use none".
+        Tools and resources must be explicitly selected per agent.
     """
-    from netagent_core.db import MCPServer, KnowledgeBase
+    # Note: Empty mcp_server_ids or knowledge_base_ids means "use none"
+    # Tools and resources must be explicitly selected per agent
 
-    # Resolve "all" for MCP servers and knowledge bases if lists are empty
-    # Empty list = use all available (auto-include new resources)
-    if db_session_factory:
-        with db_session_factory() as db:
-            # Empty mcp_server_ids = use all enabled MCP servers
-            if not config.get("mcp_server_ids"):
-                all_mcp = db.query(MCPServer).filter(MCPServer.enabled == True).all()
-                config["mcp_server_ids"] = [s.id for s in all_mcp]
-                if config["mcp_server_ids"]:
-                    logger.info(f"Using all {len(config['mcp_server_ids'])} enabled MCP servers")
-
-            # Empty knowledge_base_ids = use all knowledge bases
-            if not config.get("knowledge_base_ids"):
-                all_kb = db.query(KnowledgeBase).all()
-                config["knowledge_base_ids"] = [kb.id for kb in all_kb]
-                if config["knowledge_base_ids"]:
-                    logger.info(f"Using all {len(config['knowledge_base_ids'])} knowledge bases")
-
-    # Get sync tools first (now with populated knowledge_base_ids)
+    # Get sync tools first
     tools = build_tools_for_agent_config(config, db_session_factory)
 
     # Add handoff tool if enabled and session context available
