@@ -45,6 +45,7 @@ async def list_approvals(
     db: Session = Depends(get_db),
     user: ALBUser = Depends(get_current_user),
     status: Optional[str] = None,
+    session_id: Optional[int] = None,
     limit: int = Query(default=50, le=100),
     offset: int = 0,
 ):
@@ -53,6 +54,8 @@ async def list_approvals(
 
     if status:
         query = query.filter(Approval.status == status)
+    if session_id:
+        query = query.filter(Approval.session_id == session_id)
 
     total = query.count()
     approvals = query.order_by(Approval.created_at.desc()).offset(offset).limit(limit).all()
