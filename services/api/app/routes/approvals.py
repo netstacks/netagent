@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from netagent_core.db import get_db, Approval, AgentSession
 from netagent_core.auth import get_current_user, ALBUser
 from netagent_core.utils import audit_log, AuditEventType
+from netagent_core.redis_events import publish_session_event, publish_live_session_event
 
 router = APIRouter()
 
@@ -126,6 +127,16 @@ async def approve_action(
             session.status = "active"
             db.commit()
 
+            # Publish approval resolved event
+            publish_session_event(approval.session_id, "approval_resolved", {
+                "approval_id": approval.id,
+                "status": "approved",
+                "resolved_by": user.email,
+            })
+            publish_live_session_event("session_resumed", {
+                "session_id": approval.session_id,
+            })
+
     audit_log(
         db,
         AuditEventType.APPROVAL_GRANTED,
@@ -166,6 +177,18 @@ async def reject_action(
         if session and session.status == "waiting_approval":
             session.status = "failed"
             db.commit()
+
+            # Publish rejection event
+            publish_session_event(approval.session_id, "approval_resolved", {
+                "approval_id": approval.id,
+                "status": "rejected",
+                "resolved_by": user.email,
+                "note": data.note,
+            })
+            publish_live_session_event("session_failed", {
+                "session_id": approval.session_id,
+                "reason": "Approval rejected",
+            })
 
     audit_log(
         db,
