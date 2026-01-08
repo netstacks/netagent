@@ -4,7 +4,8 @@ import os
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Depends
+import httpx
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
@@ -15,6 +16,29 @@ sys.path.insert(0, '/app/shared')
 
 from netagent_core.auth import get_current_user, get_current_user_optional, ALBUser
 from netagent_core.db import init_db
+
+# API service URL for fetching data
+API_URL = os.getenv("API_URL", "http://api:8000")
+
+
+async def fetch_from_api(path: str, request: Request):
+    """Fetch data from the API service, forwarding auth headers."""
+    headers = {}
+    # Forward ALB authentication headers
+    if "x-amzn-oidc-data" in request.headers:
+        headers["x-amzn-oidc-data"] = request.headers["x-amzn-oidc-data"]
+    if "x-amzn-oidc-identity" in request.headers:
+        headers["x-amzn-oidc-identity"] = request.headers["x-amzn-oidc-identity"]
+    if "x-amzn-oidc-accesstoken" in request.headers:
+        headers["x-amzn-oidc-accesstoken"] = request.headers["x-amzn-oidc-accesstoken"]
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"{API_URL}{path}", headers=headers, timeout=30.0)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,8 +65,9 @@ app = FastAPI(
 # Mount static files
 app.mount("/static", StaticFiles(directory="/app/static"), name="static")
 
-# Templates
+# Templates - auto_reload for development
 templates = Jinja2Templates(directory="/app/templates")
+templates.env.auto_reload = True
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -91,6 +116,7 @@ async def agent_create(
             "request": request,
             "user": user,
             "active_page": "agent_create",
+            "agent_id": None,
             "pending_approvals": 0,
         }
     )
@@ -129,80 +155,6 @@ async def agent_chat(
             "user": user,
             "active_page": "agents",
             "agent_id": agent_id,
-            "pending_approvals": 0,
-        }
-    )
-
-
-@app.get("/workflows", response_class=HTMLResponse)
-async def workflows_list(
-    request: Request,
-    user: ALBUser = Depends(get_current_user_optional),
-):
-    """Workflows list page."""
-    return templates.TemplateResponse(
-        "workflows.html",
-        {
-            "request": request,
-            "user": user,
-            "active_page": "workflows",
-            "pending_approvals": 0,
-        }
-    )
-
-
-@app.get("/workflows/new", response_class=HTMLResponse)
-async def workflow_builder(
-    request: Request,
-    user: ALBUser = Depends(get_current_user_optional),
-):
-    """Workflow builder page."""
-    return templates.TemplateResponse(
-        "workflow_builder.html",
-        {
-            "request": request,
-            "user": user,
-            "active_page": "workflow_builder",
-            "pending_approvals": 0,
-        }
-    )
-
-
-@app.get("/workflows/{workflow_id}", response_class=HTMLResponse)
-async def workflow_detail(
-    request: Request,
-    workflow_id: int,
-    user: ALBUser = Depends(get_current_user_optional),
-):
-    """Workflow detail/edit page."""
-    return templates.TemplateResponse(
-        "workflow_builder.html",
-        {
-            "request": request,
-            "user": user,
-            "active_page": "workflows",
-            "workflow_id": workflow_id,
-            "pending_approvals": 0,
-        }
-    )
-
-
-@app.get("/workflows/{workflow_id}/runs/{run_id}", response_class=HTMLResponse)
-async def workflow_run(
-    request: Request,
-    workflow_id: int,
-    run_id: int,
-    user: ALBUser = Depends(get_current_user_optional),
-):
-    """Workflow run detail page."""
-    return templates.TemplateResponse(
-        "workflow_run.html",
-        {
-            "request": request,
-            "user": user,
-            "active_page": "workflows",
-            "workflow_id": workflow_id,
-            "run_id": run_id,
             "pending_approvals": 0,
         }
     )
@@ -293,6 +245,45 @@ async def audit_log(
     )
 
 
+@app.get("/sessions", response_class=HTMLResponse)
+async def sessions_list(
+    request: Request,
+    user: ALBUser = Depends(get_current_user_optional),
+):
+    """Sessions list page."""
+    return templates.TemplateResponse(
+        "sessions.html",
+        {
+            "request": request,
+            "user": user,
+            "active_page": "sessions",
+            "pending_approvals": 0,
+        }
+    )
+
+
+@app.get("/sessions/{session_id}", response_class=HTMLResponse)
+async def session_detail(
+    request: Request,
+    session_id: int,
+    user: ALBUser = Depends(get_current_user_optional),
+):
+    """Session detail page - redirects to agent chat with session loaded."""
+    # Fetch the session to get the agent_id
+    try:
+        session_data = await fetch_from_api(f"/api/chat/sessions/{session_id}", request)
+        if session_data:
+            agent_id = session_data.get("agent_id")
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url=f"/agents/{agent_id}/chat?session={session_id}")
+    except Exception:
+        pass
+
+    # If session not found, show sessions list
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/sessions")
+
+
 @app.get("/settings", response_class=HTMLResponse)
 async def settings(
     request: Request,
@@ -305,6 +296,40 @@ async def settings(
             "request": request,
             "user": user,
             "active_page": "settings",
+            "pending_approvals": 0,
+        }
+    )
+
+
+@app.get("/scheduled-tasks", response_class=HTMLResponse)
+async def scheduled_tasks_list(
+    request: Request,
+    user: ALBUser = Depends(get_current_user_optional),
+):
+    """Scheduled tasks page."""
+    return templates.TemplateResponse(
+        "scheduled_tasks.html",
+        {
+            "request": request,
+            "user": user,
+            "active_page": "scheduled_tasks",
+            "pending_approvals": 0,
+        }
+    )
+
+
+@app.get("/live-sessions", response_class=HTMLResponse)
+async def live_sessions(
+    request: Request,
+    user: ALBUser = Depends(get_current_user_optional),
+):
+    """Live sessions monitoring page."""
+    return templates.TemplateResponse(
+        "live_sessions.html",
+        {
+            "request": request,
+            "user": user,
+            "active_page": "live_sessions",
             "pending_approvals": 0,
         }
     )

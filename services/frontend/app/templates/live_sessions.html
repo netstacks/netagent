@@ -1,0 +1,384 @@
+{% extends "base.html" %}
+
+{% block title %}Live Sessions - NetAgent{% endblock %}
+
+{% block extra_css %}
+<style>
+/* Blinking animation for active sessions */
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0.3; }
+}
+
+.status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+}
+
+.status-dot.active {
+    background-color: var(--bs-primary);
+    animation: blink 1.5s infinite;
+}
+
+.status-dot.waiting {
+    background-color: var(--bs-warning);
+    animation: blink 0.8s infinite;
+}
+
+/* Card hover effect */
+.session-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.session-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Connection status indicator */
+.connection-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.connection-status.connected {
+    background-color: rgba(25, 135, 84, 0.2);
+    color: #198754;
+}
+
+.connection-status.disconnected {
+    background-color: rgba(220, 53, 69, 0.2);
+    color: #dc3545;
+}
+
+/* Message preview styling */
+.message-preview {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.9rem;
+    color: var(--bs-secondary-color);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">Live Sessions</h2>
+        <p class="text-muted mb-0">Monitor active agent sessions in real-time</p>
+    </div>
+    <div class="d-flex align-items-center gap-3">
+        <span class="connection-status disconnected" id="connection-status">
+            <i class="fas fa-circle me-2" style="font-size: 8px;"></i>
+            <span id="connection-text">Disconnected</span>
+        </span>
+        <button class="btn btn-outline-secondary" id="btn-refresh">
+            <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+    </div>
+</div>
+
+<!-- Session Cards Grid -->
+<div class="row g-4" id="sessions-grid">
+    <!-- Sessions will be loaded here -->
+</div>
+
+<!-- Empty State -->
+<div id="empty-state" class="text-center py-5 d-none">
+    <i class="fas fa-broadcast-tower display-1 text-muted mb-3"></i>
+    <h4>No Active Sessions</h4>
+    <p class="text-muted">There are no active agent sessions at the moment.</p>
+    <a href="/agents" class="btn btn-primary mt-2">
+        <i class="fas fa-robot me-2"></i>View Agents
+    </a>
+</div>
+
+<!-- Session Detail Modal -->
+<div class="modal fade" id="sessionModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Session Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="session-modal-body">
+                <!-- Session details loaded dynamically -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <a href="#" class="btn btn-primary" id="btn-open-chat">
+                    <i class="fas fa-comments me-1"></i>Open Chat
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let sessions = [];
+let eventSource = null;
+let reconnectTimeout = null;
+let currentSessionId = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadSessions();
+    connectSSE();
+
+    document.getElementById('btn-refresh').addEventListener('click', loadSessions);
+});
+
+// Clean up on page unload
+window.addEventListener('beforeunload', function() {
+    if (eventSource) {
+        eventSource.close();
+    }
+    if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+    }
+});
+
+async function loadSessions() {
+    try {
+        const response = await api.get('/api/chat/sessions/live');
+        sessions = response.sessions || [];
+        renderSessions();
+    } catch (error) {
+        console.error('Failed to load sessions:', error);
+        showToast('Failed to load live sessions', 'error');
+    }
+}
+
+function renderSessions() {
+    const grid = document.getElementById('sessions-grid');
+    const emptyState = document.getElementById('empty-state');
+
+    if (sessions.length === 0) {
+        grid.innerHTML = '';
+        emptyState.classList.remove('d-none');
+        return;
+    }
+
+    emptyState.classList.add('d-none');
+    grid.innerHTML = sessions.map(session => `
+        <div class="col-md-6 col-lg-4">
+            <div class="card session-card h-100" data-session-id="${session.id}">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-3">
+                        <div class="d-flex align-items-center">
+                            ${getStatusBadge(session.status)}
+                        </div>
+                        <small class="text-muted">${formatTimeAgo(session.created_at)}</small>
+                    </div>
+
+                    <h5 class="card-title mb-2">
+                        <i class="fas fa-robot me-2 text-primary"></i>
+                        ${escapeHtml(session.agent_name) || 'Unknown Agent'}
+                    </h5>
+
+                    ${session.latest_message ? `
+                        <p class="message-preview mb-3">${escapeHtml(session.latest_message)}</p>
+                    ` : `
+                        <p class="text-muted mb-3"><em>No messages yet</em></p>
+                    `}
+
+                    ${session.status === 'waiting_approval' ? `
+                        <div class="alert alert-warning py-2 px-3 mb-3">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <small>Pending approval required</small>
+                        </div>
+                    ` : ''}
+
+                    <div class="d-flex flex-wrap gap-2">
+                        ${session.status === 'waiting_approval' ? `
+                            <button class="btn btn-success btn-sm" onclick="approveSession(${session.id}); event.stopPropagation();">
+                                <i class="fas fa-check me-1"></i>Approve
+                            </button>
+                            <button class="btn btn-danger btn-sm" onclick="rejectSession(${session.id}); event.stopPropagation();">
+                                <i class="fas fa-times me-1"></i>Reject
+                            </button>
+                        ` : ''}
+                        <button class="btn btn-outline-primary btn-sm" onclick="viewSession(${session.id}, ${session.agent_id}); event.stopPropagation();">
+                            <i class="fas fa-eye me-1"></i>View
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="cancelSession(${session.id}); event.stopPropagation();">
+                            <i class="fas fa-stop me-1"></i>Cancel
+                        </button>
+                    </div>
+                </div>
+                <div class="card-footer bg-transparent">
+                    <small class="text-muted">
+                        <i class="fas fa-comment me-1"></i>${session.message_count || 0} messages
+                        <span class="mx-2">|</span>
+                        <i class="fas fa-tools me-1"></i>${session.tool_call_count || 0} tools
+                        ${session.user_email ? `
+                            <span class="mx-2">|</span>
+                            <i class="fas fa-user me-1"></i>${session.user_email.split('@')[0]}
+                        ` : ''}
+                    </small>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function getStatusBadge(status) {
+    if (status === 'active') {
+        return `<span class="badge bg-primary">
+            <span class="status-dot active"></span>Active
+        </span>`;
+    } else if (status === 'waiting_approval') {
+        return `<span class="badge bg-warning text-dark">
+            <span class="status-dot waiting"></span>Waiting Approval
+        </span>`;
+    }
+    return `<span class="badge bg-secondary">${status}</span>`;
+}
+
+function formatTimeAgo(dateString) {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    const now = new Date();
+    const seconds = Math.floor((now - date) / 1000);
+
+    if (seconds < 60) return 'Just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+function connectSSE() {
+    if (eventSource) {
+        eventSource.close();
+    }
+
+    const statusEl = document.getElementById('connection-status');
+    const textEl = document.getElementById('connection-text');
+
+    try {
+        eventSource = new EventSource('/api/chat/sessions/live/stream');
+
+        eventSource.onopen = function() {
+            statusEl.classList.remove('disconnected');
+            statusEl.classList.add('connected');
+            textEl.textContent = 'Connected';
+            console.log('SSE connected');
+        };
+
+        eventSource.onmessage = function(event) {
+            handleSSEEvent(event);
+        };
+
+        eventSource.onerror = function(error) {
+            console.error('SSE error:', error);
+            statusEl.classList.remove('connected');
+            statusEl.classList.add('disconnected');
+            textEl.textContent = 'Disconnected';
+
+            eventSource.close();
+
+            // Auto-reconnect after 5 seconds
+            reconnectTimeout = setTimeout(function() {
+                console.log('Attempting to reconnect SSE...');
+                connectSSE();
+            }, 5000);
+        };
+    } catch (error) {
+        console.error('Failed to connect SSE:', error);
+        statusEl.classList.remove('connected');
+        statusEl.classList.add('disconnected');
+        textEl.textContent = 'Disconnected';
+    }
+}
+
+function handleSSEEvent(event) {
+    try {
+        const data = JSON.parse(event.data);
+        console.log('SSE event received:', data);
+
+        // Refresh sessions on any event
+        loadSessions();
+    } catch (error) {
+        console.error('Failed to parse SSE event:', error);
+    }
+}
+
+async function cancelSession(sessionId) {
+    if (!confirm('Are you sure you want to cancel this session?')) {
+        return;
+    }
+
+    try {
+        await api.post(`/api/chat/sessions/${sessionId}/cancel`);
+        showToast('Session cancelled', 'success');
+        loadSessions();
+    } catch (error) {
+        console.error('Failed to cancel session:', error);
+        showToast('Failed to cancel session', 'error');
+    }
+}
+
+async function approveSession(sessionId) {
+    try {
+        // Find pending approvals for this session
+        const response = await api.get(`/api/approvals?status=pending&session_id=${sessionId}`);
+        const approvals = response.items || [];
+
+        if (approvals.length === 0) {
+            showToast('No pending approvals found', 'warning');
+            return;
+        }
+
+        // Approve the first pending approval
+        await api.post(`/api/approvals/${approvals[0].id}/approve`);
+        showToast('Session approved', 'success');
+        loadSessions();
+    } catch (error) {
+        console.error('Failed to approve session:', error);
+        showToast('Failed to approve session', 'error');
+    }
+}
+
+async function rejectSession(sessionId) {
+    try {
+        // Find pending approvals for this session
+        const response = await api.get(`/api/approvals?status=pending&session_id=${sessionId}`);
+        const approvals = response.items || [];
+
+        if (approvals.length === 0) {
+            showToast('No pending approvals found', 'warning');
+            return;
+        }
+
+        // Reject the first pending approval
+        await api.post(`/api/approvals/${approvals[0].id}/reject`);
+        showToast('Session rejected', 'info');
+        loadSessions();
+    } catch (error) {
+        console.error('Failed to reject session:', error);
+        showToast('Failed to reject session', 'error');
+    }
+}
+
+function viewSession(sessionId, agentId) {
+    window.location.href = `/agents/${agentId}/chat?session=${sessionId}`;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

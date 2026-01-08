@@ -4,15 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}NetAgent{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
 
     <!-- Bootstrap 5.3 -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Font Awesome 6 -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons (for templates using bi-* classes) -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" rel="stylesheet">
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <!-- Custom CSS -->
-    <link href="/static/css/style.css" rel="stylesheet">
+    <link href="/static/css/style.css?v=6" rel="stylesheet">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
@@ -45,20 +48,6 @@
                 </a>
             </li>
 
-            <li class="nav-section">Workflows</li>
-            <li class="nav-item">
-                <a href="/workflows" class="nav-link {% if active_page == 'workflows' %}active{% endif %}">
-                    <i class="fas fa-sitemap"></i>
-                    <span>Workflows</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="/workflows/new" class="nav-link {% if active_page == 'workflow_builder' %}active{% endif %}">
-                    <i class="fas fa-diagram-project"></i>
-                    <span>Workflow Builder</span>
-                </a>
-            </li>
-
             <li class="nav-section">Knowledge</li>
             <li class="nav-item">
                 <a href="/knowledge" class="nav-link {% if active_page == 'knowledge' %}active{% endif %}">
@@ -82,6 +71,18 @@
             </li>
 
             <li class="nav-section">Operations</li>
+            <li class="nav-item">
+                <a href="/scheduled-tasks" class="nav-link {% if active_page == 'scheduled_tasks' %}active{% endif %}">
+                    <i class="fas fa-clock"></i>
+                    <span>Scheduled Tasks</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/live-sessions" class="nav-link {% if active_page == 'live_sessions' %}active{% endif %}">
+                    <i class="fas fa-broadcast-tower"></i>
+                    <span>Live Sessions</span>
+                </a>
+            </li>
             <li class="nav-item">
                 <a href="/approvals" class="nav-link {% if active_page == 'approvals' %}active{% endif %}">
                     <i class="fas fa-clipboard-check"></i>
@@ -132,10 +133,10 @@
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- API Client -->
-    <script src="/static/js/api-client.js"></script>
-    <!-- Common JS -->
-    <script src="/static/js/common.js"></script>
+    <!-- Common JS (must load first - defines toast) -->
+    <script src="/static/js/common.js?v=3"></script>
+    <!-- API Client (uses toast from common.js) -->
+    <script src="/static/js/api-client.js?v=3"></script>
 
     <script>
         // Toggle sidebar on mobile
