@@ -1,0 +1,648 @@
+{% extends "base.html" %}
+{% block title %}Job: {{ job.name }} - NetAgent{% endblock %}
+{% block page_title %}Job Details{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-3 mb-2">
+                <a href="/jobs" class="btn btn-sm btn-outline-secondary">
+                    <i class="fas fa-arrow-left me-1"></i>Back
+                </a>
+                <h2 class="mb-0">{{ job.name }}</h2>
+                <span class="badge bg-{{ status_color }} fs-6" id="job-status">
+                    {{ job.status.replace('_', ' ') }}
+                </span>
+            </div>
+            <p class="text-muted mb-0">
+                Job #{{ job.id }} | Created {{ job.created_at.strftime('%Y-%m-%d %H:%M') }}
+                {% if job.created_by %} by User #{{ job.created_by }}{% endif %}
+            </p>
+        </div>
+        <div class="btn-group">
+            <!-- Edit button - available for all statuses -->
+            <a href="/jobs/{{ job.id }}/edit" class="btn btn-outline-primary">
+                <i class="fas fa-edit me-1"></i>{% if job.status == 'pending' %}Edit{% else %}Edit as New{% endif %}
+            </a>
+            {% if job.status == 'pending' %}
+            <button onclick="startJob({{ job.id }})" class="btn btn-success">
+                <i class="fas fa-play me-1"></i>Start
+            </button>
+            {% endif %}
+            {% if job.status in ['pending', 'queued', 'executing'] %}
+            <button onclick="cancelJob({{ job.id }})" class="btn btn-danger">
+                <i class="fas fa-times me-1"></i>Cancel
+            </button>
+            {% endif %}
+            {% if job.status in ['failed', 'cancelled'] %}
+            <button onclick="retryJob({{ job.id }})" class="btn btn-warning">
+                <i class="fas fa-redo me-1"></i>Retry Failed
+            </button>
+            {% endif %}
+            {% if job.status in ['completed', 'failed', 'cancelled'] %}
+            <button onclick="rerunJob({{ job.id }})" class="btn btn-primary">
+                <i class="fas fa-sync me-1"></i>Rerun All
+            </button>
+            {% endif %}
+            {% if job.status == 'completed' %}
+            <button onclick="redeliverResults({{ job.id }})" class="btn btn-secondary">
+                <i class="fas fa-paper-plane me-1"></i>Re-deliver
+            </button>
+            {% endif %}
+            {% if job.status in ['completed', 'failed', 'cancelled'] %}
+            <button onclick="deleteJob({{ job.id }})" class="btn btn-outline-danger">
+                <i class="fas fa-trash me-1"></i>Delete
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Progress Bar -->
+    {% if job.total_tasks > 0 %}
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between mb-2">
+                <span>Progress</span>
+                <span>{{ job.completed_tasks }}/{{ job.total_tasks }} tasks
+                    {% if job.failed_tasks > 0 %}
+                    <span class="text-danger">({{ job.failed_tasks }} failed)</span>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="progress" style="height: 10px;">
+                {% set progress = (job.completed_tasks / job.total_tasks * 100) if job.total_tasks > 0 else 0 %}
+                <div class="progress-bar bg-success" style="width: {{ progress }}%"></div>
+                {% if job.failed_tasks > 0 %}
+                {% set fail_progress = (job.failed_tasks / job.total_tasks * 100) %}
+                <div class="progress-bar bg-danger" style="width: {{ fail_progress }}%"></div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Tabs -->
+    <ul class="nav nav-tabs" id="jobTabs" role="tablist">
+        <li class="nav-item">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#spec-tab">
+                <i class="fas fa-file-code me-1"></i>Specification
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tasks-tab">
+                <i class="fas fa-tasks me-1"></i>Tasks ({{ job.tasks | length }})
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#config-tab">
+                <i class="fas fa-cog me-1"></i>Configuration
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#results-tab">
+                <i class="fas fa-poll me-1"></i>Results
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#orchestration-tab" onclick="loadOrchestration()">
+                <i class="fas fa-project-diagram me-1"></i>Orchestration
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content mt-3">
+        <!-- Specification Tab -->
+        <div class="tab-pane fade show active" id="spec-tab">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-file-alt me-1"></i>Original Specification
+                </div>
+                <div class="card-body">
+                    <pre class="bg-dark p-3 rounded mb-0" style="white-space: pre-wrap;">{{ job.spec_raw }}</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tasks Tab -->
+        <div class="tab-pane fade" id="tasks-tab">
+            <div class="card">
+                <div class="card-body p-0">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">#</th>
+                                <th>Task</th>
+                                <th>Agent</th>
+                                <th>Status</th>
+                                <th>Duration</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for task in job.tasks %}
+                            <tr>
+                                <td><code>{{ task.sequence }}</code></td>
+                                <td>
+                                    <strong>{{ task.name }}</strong>
+                                    {% if task.is_batch %}
+                                    <span class="badge bg-info ms-1">Batch</span>
+                                    {% endif %}
+                                    {% if task.description %}
+                                    <br><small class="text-muted">{{ task.description[:100] }}{% if task.description|length > 100 %}...{% endif %}</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if task.agent_id %}
+                                    <span class="badge bg-primary">Agent #{{ task.agent_id }}</span>
+                                    {% elif task.ephemeral_agent_id %}
+                                    <span class="badge bg-secondary">Ephemeral</span>
+                                    {% elif task.agent_name_hint %}
+                                    <small class="text-muted">{{ task.agent_name_hint }}</small>
+                                    {% else %}
+                                    <small class="text-muted">Auto-match</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge bg-{{ task_status_color(task.status) }}">
+                                        {{ task.status }}
+                                    </span>
+                                </td>
+                                <td>{{ task_duration(task) }}</td>
+                                <td>
+                                    {% if task.session_id %}
+                                    <a href="/sessions/{{ task.session_id }}" class="btn btn-sm btn-outline-primary" title="View Session">
+                                        <i class="fas fa-comments"></i>
+                                    </a>
+                                    {% endif %}
+                                    <button onclick="showTaskDetails({{ task.id }})" class="btn btn-sm btn-outline-secondary" title="Details">
+                                        <i class="fas fa-info-circle"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Configuration Tab -->
+        <div class="tab-pane fade" id="config-tab">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card mb-3">
+                        <div class="card-header">Execution</div>
+                        <div class="card-body">
+                            <dl class="row mb-0">
+                                <dt class="col-sm-5">Mode</dt>
+                                <dd class="col-sm-7">
+                                    <span class="badge bg-secondary">{{ job.execution_mode }}</span>
+                                    {% if job.execution_mode == 'batch' %}
+                                    ({{ job.batch_size }} at a time)
+                                    {% endif %}
+                                </dd>
+
+                                <dt class="col-sm-5">On Failure</dt>
+                                <dd class="col-sm-7">{{ job.on_failure }}</dd>
+
+                                <dt class="col-sm-5">Validation</dt>
+                                <dd class="col-sm-7">{{ job.validation_mode }}</dd>
+                            </dl>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <div class="card mb-3">
+                        <div class="card-header">Delivery</div>
+                        <div class="card-body">
+                            {% if job.delivery_config %}
+                            <dl class="row mb-0">
+                                {% if job.delivery_config.email %}
+                                <dt class="col-sm-4">Email</dt>
+                                <dd class="col-sm-8">{{ job.delivery_config.email | join(', ') }}</dd>
+                                {% endif %}
+
+                                {% if job.delivery_config.slack %}
+                                <dt class="col-sm-4">Slack</dt>
+                                <dd class="col-sm-8">{{ job.delivery_config.slack | join(', ') }}</dd>
+                                {% endif %}
+
+                                {% if job.delivery_config.webhook %}
+                                <dt class="col-sm-4">Webhook</dt>
+                                <dd class="col-sm-8">{{ job.delivery_config.webhook | length }} endpoint(s)</dd>
+                                {% endif %}
+                            </dl>
+                            {% else %}
+                            <p class="text-muted mb-0">No delivery configured</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Tab -->
+        <div class="tab-pane fade" id="results-tab">
+            <div class="card">
+                <div class="card-body">
+                    {% if job.results %}
+                    <pre class="bg-dark p-3 rounded mb-0" style="white-space: pre-wrap;">{{ job.results | tojson(indent=2) }}</pre>
+                    {% elif job.error_summary %}
+                    <div class="alert alert-danger mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        {{ job.error_summary }}
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">No results yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Orchestration Tab -->
+        <div class="tab-pane fade" id="orchestration-tab">
+            <div id="orchestration-content">
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="text-muted mt-2">Loading orchestration details...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Task Details Modal -->
+<div class="modal fade" id="taskDetailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Task Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="taskDetailsContent">
+                Loading...
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function startJob(jobId) {
+    if (!confirm('Start this job?')) return;
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/start`, { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to start job');
+        showToast('Job started', 'success');
+        location.reload();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function cancelJob(jobId) {
+    if (!confirm('Cancel this job?')) return;
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to cancel job');
+        showToast('Job cancelled', 'success');
+        location.reload();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function retryJob(jobId) {
+    if (!confirm('Retry failed tasks only?')) return;
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/retry`, { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to retry job');
+        showToast('Job queued for retry', 'success');
+        location.reload();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function rerunJob(jobId) {
+    if (!confirm('Rerun all tasks from scratch?')) return;
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/rerun`, { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to rerun job');
+        showToast('Job queued for rerun', 'success');
+        location.reload();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function redeliverResults(jobId) {
+    if (!confirm('Re-send results to delivery channels?')) return;
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/redeliver`, { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to queue redelivery');
+        showToast('Results queued for redelivery', 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function showTaskDetails(taskId) {
+    const modal = new bootstrap.Modal(document.getElementById('taskDetailsModal'));
+    const content = document.getElementById('taskDetailsContent');
+    content.innerHTML = '<div class="text-center py-4"><div class="spinner-border"></div></div>';
+    modal.show();
+
+    try {
+        const response = await fetch(`/api/jobs/{{ job.id }}/tasks`);
+        if (!response.ok) throw new Error('Failed to load task details');
+        const tasks = await response.json();
+        const task = tasks.find(t => t.id === taskId);
+
+        if (!task) {
+            content.innerHTML = '<div class="alert alert-warning">Task not found</div>';
+            return;
+        }
+
+        const statusColors = {
+            'pending': 'secondary',
+            'running': 'primary',
+            'completed': 'success',
+            'failed': 'danger',
+            'skipped': 'dark'
+        };
+
+        content.innerHTML = `
+            <div class="mb-3">
+                <h6 class="text-muted mb-1">Task Name</h6>
+                <p class="mb-0 fw-medium">${escapeHtml(task.name)}</p>
+            </div>
+
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <h6 class="text-muted mb-1">Status</h6>
+                    <span class="badge bg-${statusColors[task.status] || 'secondary'}">${task.status}</span>
+                </div>
+                <div class="col-md-4">
+                    <h6 class="text-muted mb-1">Sequence</h6>
+                    <p class="mb-0">#${task.sequence}</p>
+                </div>
+                <div class="col-md-4">
+                    <h6 class="text-muted mb-1">Agent</h6>
+                    <p class="mb-0">${task.agent_id ? 'Agent #' + task.agent_id : (task.agent_name_hint || 'Auto-match')}</p>
+                </div>
+            </div>
+
+            ${task.description ? `
+            <div class="mb-3">
+                <h6 class="text-muted mb-1">Description</h6>
+                <p class="mb-0">${escapeHtml(task.description)}</p>
+            </div>
+            ` : ''}
+
+            ${task.started_at || task.completed_at ? `
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <h6 class="text-muted mb-1">Started</h6>
+                    <p class="mb-0">${task.started_at ? new Date(task.started_at).toLocaleString() : '-'}</p>
+                </div>
+                <div class="col-md-6">
+                    <h6 class="text-muted mb-1">Completed</h6>
+                    <p class="mb-0">${task.completed_at ? new Date(task.completed_at).toLocaleString() : '-'}</p>
+                </div>
+            </div>
+            ` : ''}
+
+            ${task.error ? `
+            <div class="mb-3">
+                <h6 class="text-muted mb-1">Error</h6>
+                <div class="alert alert-danger mb-0">
+                    <pre class="mb-0" style="white-space: pre-wrap;">${escapeHtml(task.error)}</pre>
+                </div>
+            </div>
+            ` : ''}
+
+            ${task.result ? `
+            <div class="mb-3">
+                <h6 class="text-muted mb-1">Result</h6>
+                <pre class="bg-dark p-3 rounded mb-0" style="white-space: pre-wrap; max-height: 300px; overflow-y: auto;">${escapeHtml(typeof task.result === 'object' ? JSON.stringify(task.result, null, 2) : task.result)}</pre>
+            </div>
+            ` : ''}
+
+            ${task.session_id ? `
+            <div class="mt-3">
+                <a href="/sessions/${task.session_id}" class="btn btn-primary">
+                    <i class="fas fa-comments me-1"></i>View Session
+                </a>
+            </div>
+            ` : ''}
+        `;
+    } catch (error) {
+        content.innerHTML = `<div class="alert alert-danger">${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function deleteJob(jobId) {
+    if (!confirm('Delete this job? This action cannot be undone.')) return;
+    try {
+        const response = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to delete job');
+        }
+        showToast('Job deleted', 'success');
+        window.location.href = '/jobs';
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+// Auto-refresh for running jobs
+{% if job.status in ['queued', 'executing'] %}
+setTimeout(() => location.reload(), 10000);
+{% endif %}
+
+let orchestrationLoaded = false;
+
+async function loadOrchestration() {
+    if (orchestrationLoaded) return;
+
+    const container = document.getElementById('orchestration-content');
+
+    try {
+        const response = await fetch(`/api/jobs/{{ job.id }}/orchestration`);
+        if (!response.ok) throw new Error('Failed to load orchestration details');
+        const data = await response.json();
+
+        if (!data.task_sessions || data.task_sessions.length === 0) {
+            container.innerHTML = `
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i>
+                    No orchestration data available yet. The job may not have been executed.
+                </div>
+            `;
+            return;
+        }
+
+        let html = `
+            <div class="mb-3">
+                <small class="text-muted">
+                    Execution Mode: <span class="badge bg-secondary">${data.execution_mode}</span>
+                    ${data.started_at ? `| Started: ${new Date(data.started_at).toLocaleString()}` : ''}
+                    ${data.completed_at ? `| Completed: ${new Date(data.completed_at).toLocaleString()}` : ''}
+                </small>
+            </div>
+        `;
+
+        for (const session of data.task_sessions) {
+            const statusColor = {
+                'pending': 'secondary',
+                'running': 'primary',
+                'completed': 'success',
+                'failed': 'danger',
+                'skipped': 'dark'
+            }[session.task_status] || 'secondary';
+
+            html += `
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>Task ${session.task_sequence}: ${escapeHtml(session.task_name)}</strong>
+                            <span class="badge bg-${statusColor} ms-2">${session.task_status}</span>
+                        </div>
+                        <div>
+                            <small class="text-muted me-3">
+                                Agent: ${escapeHtml(session.agent_name)}
+                                ${session.agent_is_ephemeral ? '<span class="badge bg-info">Ephemeral</span>' : ''}
+                            </small>
+                            <a href="/sessions/${session.session_id}" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-comments me-1"></i>View Session
+                            </a>
+                        </div>
+                    </div>
+                    <div class="card-body">
+            `;
+
+            // Show actions (tool calls, reasoning)
+            if (session.actions && session.actions.length > 0) {
+                html += `<h6 class="text-muted mb-2"><i class="fas fa-cogs me-1"></i>Actions & Reasoning</h6>`;
+                html += `<div class="timeline mb-3">`;
+
+                for (const action of session.actions) {
+                    const actionIcon = action.type === 'tool_call' ? 'fa-wrench' :
+                                       action.type === 'thinking' ? 'fa-brain' :
+                                       action.type === 'response' ? 'fa-comment' : 'fa-circle';
+                    const actionColor = action.status === 'completed' ? 'success' :
+                                        action.status === 'failed' ? 'danger' : 'secondary';
+
+                    html += `
+                        <div class="d-flex mb-2">
+                            <div class="me-3">
+                                <span class="badge bg-${actionColor}">
+                                    <i class="fas ${actionIcon}"></i>
+                                </span>
+                            </div>
+                            <div class="flex-grow-1">
+                                <div class="d-flex justify-content-between">
+                                    <strong>${action.type}${action.tool_name ? ': ' + escapeHtml(action.tool_name) : ''}</strong>
+                                    <small class="text-muted">${action.duration_ms ? action.duration_ms + 'ms' : ''}</small>
+                                </div>
+                    `;
+
+                    // Show reasoning if available
+                    if (action.reasoning) {
+                        html += `<div class="text-muted small mt-1"><i class="fas fa-lightbulb me-1"></i>${escapeHtml(action.reasoning)}</div>`;
+                    }
+
+                    // Show tool input/output for tool calls
+                    if (action.type === 'tool_call' && action.tool_name) {
+                        if (action.tool_input) {
+                            html += `
+                                <details class="mt-1">
+                                    <summary class="small text-primary" style="cursor: pointer;">Input</summary>
+                                    <pre class="bg-dark p-2 rounded small mt-1" style="max-height: 150px; overflow-y: auto;">${escapeHtml(JSON.stringify(action.tool_input, null, 2))}</pre>
+                                </details>
+                            `;
+                        }
+                        if (action.tool_output) {
+                            html += `
+                                <details class="mt-1">
+                                    <summary class="small text-success" style="cursor: pointer;">Output</summary>
+                                    <pre class="bg-dark p-2 rounded small mt-1" style="max-height: 150px; overflow-y: auto;">${escapeHtml(JSON.stringify(action.tool_output, null, 2))}</pre>
+                                </details>
+                            `;
+                        }
+                    }
+
+                    // Show error if present
+                    if (action.error) {
+                        html += `<div class="alert alert-danger small mt-1 mb-0 py-1">${escapeHtml(action.error)}</div>`;
+                    }
+
+                    html += `
+                            </div>
+                        </div>
+                    `;
+                }
+
+                html += `</div>`;
+            }
+
+            // Show messages summary
+            if (session.messages && session.messages.length > 0) {
+                html += `
+                    <details>
+                        <summary class="text-muted small mb-2" style="cursor: pointer;">
+                            <i class="fas fa-envelope me-1"></i>Messages (${session.messages.length})
+                        </summary>
+                        <div class="mt-2">
+                `;
+
+                for (const msg of session.messages) {
+                    const roleColor = msg.role === 'user' ? 'primary' :
+                                     msg.role === 'assistant' ? 'success' :
+                                     msg.role === 'tool' ? 'warning' : 'secondary';
+                    html += `
+                        <div class="border-start border-3 border-${roleColor} ps-2 mb-2">
+                            <small class="text-${roleColor} fw-bold">${msg.role}</small>
+                            ${msg.token_count ? `<small class="text-muted ms-2">(${msg.token_count} tokens)</small>` : ''}
+                            <div class="small">${msg.content ? escapeHtml(msg.content.substring(0, 500)) + (msg.content.length > 500 ? '...' : '') : '<em class="text-muted">No content</em>'}</div>
+                        </div>
+                    `;
+                }
+
+                html += `</div></details>`;
+            }
+
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+
+        container.innerHTML = html;
+        orchestrationLoaded = true;
+
+    } catch (error) {
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                Failed to load orchestration details: ${escapeHtml(error.message)}
+            </div>
+        `;
+    }
+}
+</script>
+{% endblock %}

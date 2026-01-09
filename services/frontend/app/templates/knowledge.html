@@ -166,7 +166,7 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
 <script>
 let knowledgeBases = [];
 
@@ -193,7 +193,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function loadKnowledgeBases() {
     try {
-        knowledgeBases = await api.get('/api/knowledge');
+        const response = await api.get('/api/knowledge');
+        knowledgeBases = response.items || [];
         renderKnowledgeBases();
         updateSearchSelect();
     } catch (error) {
@@ -345,13 +346,13 @@ async function searchKnowledge() {
     const kbIds = kbId ? [parseInt(kbId)] : knowledgeBases.map(kb => kb.id);
 
     try {
-        const results = await api.post('/api/knowledge/search', {
+        const response = await api.post('/api/knowledge/search', {
             query: query,
             knowledge_base_ids: kbIds,
             top_k: 5
         });
 
-        renderSearchResults(results);
+        renderSearchResults(response.results || []);
     } catch (error) {
         showToast('Search failed', 'error');
     }

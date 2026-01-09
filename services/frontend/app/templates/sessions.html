@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+
+{% block title %}Sessions - NetAgent{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">Agent Sessions</h2>
+        <p class="text-muted mb-0">View and manage all chat sessions</p>
+    </div>
+    <div>
+        <button class="btn btn-outline-secondary" id="btn-refresh">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card mb-4">
+    <div class="card-body py-3">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label small">Status</label>
+                <select class="form-select form-select-sm" id="filter-status">
+                    <option value="">All Statuses</option>
+                    <option value="active">Active</option>
+                    <option value="completed">Completed</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Agent</label>
+                <select class="form-select form-select-sm" id="filter-agent">
+                    <option value="">All Agents</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Trigger</label>
+                <select class="form-select form-select-sm" id="filter-trigger">
+                    <option value="">All Triggers</option>
+                    <option value="user">User</option>
+                    <option value="webhook">Webhook</option>
+                    <option value="handoff">Handoff</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Search</label>
+                <input type="text" class="form-control form-control-sm" id="filter-search"
+                       placeholder="Search by user...">
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Sessions Table -->
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th style="width: 60px;">ID</th>
+                    <th>Agent</th>
+                    <th>Status</th>
+                    <th>Trigger</th>
+                    <th>Messages</th>
+                    <th>Tools</th>
+                    <th>User</th>
+                    <th>Created</th>
+                    <th style="width: 100px;"></th>
+                </tr>
+            </thead>
+            <tbody id="sessions-table-body">
+                <tr>
+                    <td colspan="9" class="text-center py-4 text-muted">
+                        <i class="bi bi-hourglass-split me-2"></i>Loading sessions...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Pagination -->
+<div class="d-flex justify-content-between align-items-center mt-3">
+    <span class="text-muted" id="pagination-info">Showing 0-0 of 0</span>
+    <nav>
+        <ul class="pagination pagination-sm mb-0">
+            <li class="page-item" id="prev-page">
+                <a class="page-link" href="#"><i class="bi bi-chevron-left"></i></a>
+            </li>
+            <li class="page-item" id="next-page">
+                <a class="page-link" href="#"><i class="bi bi-chevron-right"></i></a>
+            </li>
+        </ul>
+    </nav>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let sessions = [];
+let currentPage = 0;
+let pageSize = 50;
+let totalCount = 0;
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadAgents();
+    loadSessions();
+
+    document.getElementById('btn-refresh').addEventListener('click', loadSessions);
+
+    // Filter handlers
+    document.getElementById('filter-status').addEventListener('change', function() {
+        currentPage = 0;
+        loadSessions();
+    });
+    document.getElementById('filter-agent').addEventListener('change', function() {
+        currentPage = 0;
+        loadSessions();
+    });
+    document.getElementById('filter-trigger').addEventListener('change', function() {
+        currentPage = 0;
+        loadSessions();
+    });
+    document.getElementById('filter-search').addEventListener('input', debounce(function() {
+        currentPage = 0;
+        loadSessions();
+    }, 500));
+
+    // Pagination
+    document.getElementById('prev-page').addEventListener('click', function(e) {
+        e.preventDefault();
+        if (currentPage > 0) {
+            currentPage--;
+            loadSessions();
+        }
+    });
+
+    document.getElementById('next-page').addEventListener('click', function(e) {
+        e.preventDefault();
+        if ((currentPage + 1) * pageSize < totalCount) {
+            currentPage++;
+            loadSessions();
+        }
+    });
+});
+
+async function loadAgents() {
+    try {
+        const response = await api.get('/api/agents?limit=100');
+        const agentSelect = document.getElementById('filter-agent');
+        (response.items || []).forEach(agent => {
+            const option = document.createElement('option');
+            option.value = agent.id;
+            option.textContent = agent.name;
+            agentSelect.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Failed to load agents:', error);
+    }
+}
+
+async function loadSessions() {
+    const status = document.getElementById('filter-status').value;
+    const agentId = document.getElementById('filter-agent').value;
+    const search = document.getElementById('filter-search').value;
+
+    const params = new URLSearchParams({
+        limit: pageSize,
+        offset: currentPage * pageSize
+    });
+
+    if (status) params.append('status', status);
+    if (agentId) params.append('agent_id', agentId);
+
+    try {
+        const response = await api.get(`/api/chat/sessions?${params.toString()}`);
+        sessions = response.items || [];
+        totalCount = response.total || 0;
+
+        // Client-side search filter
+        if (search) {
+            const searchLower = search.toLowerCase();
+            sessions = sessions.filter(s =>
+                (s.user_email && s.user_email.toLowerCase().includes(searchLower)) ||
+                (s.agent_name && s.agent_name.toLowerCase().includes(searchLower))
+            );
+        }
+
+        renderSessionsTable();
+        updatePagination();
+    } catch (error) {
+        showToast('Failed to load sessions', 'error');
+        console.error('Failed to load sessions:', error);
+    }
+}
+
+function renderSessionsTable() {
+    const tbody = document.getElementById('sessions-table-body');
+
+    if (sessions.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="9" class="text-center py-4 text-muted">No sessions found</td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = sessions.map(session => `
+        <tr class="session-row" style="cursor: pointer;" onclick="openSession(${session.id}, ${session.agent_id})">
+            <td><span class="badge bg-secondary">#${session.id}</span></td>
+            <td>
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-robot me-2 text-primary"></i>
+                    <span>${escapeHtml(session.agent_name) || 'Unknown Agent'}</span>
+                </div>
+            </td>
+            <td>
+                <span class="badge bg-${getStatusColor(session.status)}">${session.status}</span>
+            </td>
+            <td>
+                <span class="badge bg-${getTriggerColor(session.trigger_type)}">${session.trigger_type || 'unknown'}</span>
+            </td>
+            <td>
+                <i class="bi bi-chat-dots me-1"></i>${session.message_count}
+            </td>
+            <td>
+                <i class="bi bi-tools me-1"></i>${session.tool_call_count}
+            </td>
+            <td>
+                ${session.user_email ? `
+                    <span title="${session.user_email}">
+                        <i class="bi bi-person me-1"></i>${session.user_email.split('@')[0]}
+                    </span>
+                ` : '<span class="text-muted">System</span>'}
+            </td>
+            <td>
+                <span title="${new Date(session.created_at).toLocaleString()}">
+                    ${formatTimeAgo(session.created_at)}
+                </span>
+            </td>
+            <td>
+                <a href="/agents/${session.agent_id}/chat?session=${session.id}"
+                   class="btn btn-sm btn-outline-primary"
+                   onclick="event.stopPropagation();">
+                    <i class="bi bi-chat-left-text"></i> Open
+                </a>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function openSession(sessionId, agentId) {
+    window.location.href = `/agents/${agentId}/chat?session=${sessionId}`;
+}
+
+function updatePagination() {
+    const start = currentPage * pageSize + 1;
+    const end = Math.min((currentPage + 1) * pageSize, totalCount);
+
+    document.getElementById('pagination-info').textContent =
+        `Showing ${totalCount > 0 ? start : 0}-${end} of ${totalCount}`;
+
+    document.getElementById('prev-page').classList.toggle('disabled', currentPage === 0);
+    document.getElementById('next-page').classList.toggle('disabled', end >= totalCount);
+}
+
+function getStatusColor(status) {
+    const colors = {
+        'active': 'success',
+        'completed': 'secondary',
+        'failed': 'danger'
+    };
+    return colors[status] || 'secondary';
+}
+
+function getTriggerColor(trigger) {
+    const colors = {
+        'user': 'primary',
+        'webhook': 'warning',
+        'handoff': 'info'
+    };
+    return colors[trigger] || 'secondary';
+}
+
+function formatTimeAgo(dateString) {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    const now = new Date();
+    const seconds = Math.floor((now - date) / 1000);
+
+    if (seconds < 60) return 'Just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return date.toLocaleDateString();
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

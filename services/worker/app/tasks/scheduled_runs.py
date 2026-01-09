@@ -1,68 +1,99 @@
-"""Scheduled workflow tasks."""
+"""Scheduled tasks runner."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from celery import shared_task
 
-from netagent_core.db import get_db_context, Workflow, WorkflowRun, Approval
+from netagent_core.db import get_db_context, Agent, AgentSession, Approval, ScheduledTask
 
 logger = logging.getLogger(__name__)
 
 
 @shared_task
-def check_scheduled_workflows():
-    """Check for workflows that need to run on schedule.
+def check_scheduled_tasks():
+    """Check for scheduled tasks that need to run.
 
     This task runs every minute and checks cron expressions.
     """
     with get_db_context() as db:
-        # Get scheduled workflows
-        workflows = db.query(Workflow).filter(
-            Workflow.trigger_type == "scheduled",
-            Workflow.enabled == True,
-            Workflow.schedule_cron.isnot(None),
+        # Get enabled scheduled tasks with enabled agents
+        tasks = db.query(ScheduledTask).join(Agent).filter(
+            ScheduledTask.enabled == True,
+            Agent.enabled == True,
         ).all()
 
         triggered = 0
-        for workflow in workflows:
-            if should_run_now(workflow.schedule_cron):
-                # Create workflow run
-                run = WorkflowRun(
-                    workflow_id=workflow.id,
+        for task in tasks:
+            if should_run_now(task.schedule_cron, task.last_run_at):
+                # Create agent session
+                session = AgentSession(
+                    agent_id=task.agent_id,
                     status="pending",
                     trigger_type="scheduled",
-                    trigger_data={"scheduled_at": datetime.utcnow().isoformat()},
-                    context={},
+                    context={
+                        "scheduled_task_id": task.id,
+                        "scheduled_task_name": task.name,
+                        "scheduled_at": datetime.utcnow().isoformat(),
+                        "cron": task.schedule_cron,
+                    },
                 )
-                db.add(run)
+                db.add(session)
+                db.flush()  # Get session.id
+
+                # Update task status
+                task.last_run_at = datetime.utcnow()
+                task.last_run_status = "running"
+                task.last_session_id = session.id
                 db.commit()
 
                 # Queue execution
-                from tasks.workflow_executor import execute_workflow
-                execute_workflow.delay(run.id)
+                from tasks.agent_executor import execute_agent_session
+                execute_agent_session.delay(session.id, task.prompt)
 
                 triggered += 1
-                logger.info(f"Triggered scheduled workflow: {workflow.name}")
+                logger.info(f"Triggered scheduled task: {task.name} -> agent {task.agent.name} (session {session.id})")
 
-        return {"checked": len(workflows), "triggered": triggered}
+        return {"checked": len(tasks), "triggered": triggered}
 
 
-def should_run_now(cron_expression: str) -> bool:
+# Keep old function name as alias for backwards compatibility
+check_scheduled_agents = check_scheduled_tasks
+
+
+def should_run_now(cron_expression: str, last_run: datetime = None) -> bool:
     """Check if a cron expression should run now.
 
-    Simple cron matching - for production, use croniter library.
+    Args:
+        cron_expression: Cron expression (e.g., "0 8 * * *")
+        last_run: Last time this schedule was triggered
+
+    Returns:
+        True if should run now
     """
     try:
         from croniter import croniter
-        cron = croniter(cron_expression, datetime.utcnow())
-        prev_run = cron.get_prev(datetime)
+
         now = datetime.utcnow()
+        cron = croniter(cron_expression, now)
+        prev_run = cron.get_prev(datetime)
 
         # Check if previous scheduled time was within the last minute
         diff = (now - prev_run).total_seconds()
-        return diff < 60
+        if diff >= 60:
+            return False
+
+        # Prevent duplicate runs - check if we already ran for this schedule
+        if last_run:
+            # If last run was within 60 seconds of prev_run, skip
+            last_run_diff = abs((last_run - prev_run).total_seconds())
+            if last_run_diff < 60:
+                return False
+
+        return True
+
     except ImportError:
-        # Fallback: simple minute-based check
+        # Fallback: simple minute-based check without croniter
+        logger.warning("croniter not installed, using simple schedule check")
         parts = cron_expression.split()
         if len(parts) != 5:
             return False
@@ -77,8 +108,14 @@ def should_run_now(cron_expression: str) -> bool:
         if hour != "*" and int(hour) != now.hour:
             return False
 
+        # Simple duplicate prevention
+        if last_run and (now - last_run).total_seconds() < 60:
+            return False
+
         return True
-    except Exception:
+
+    except Exception as e:
+        logger.error(f"Error checking schedule: {e}")
         return False
 
 
@@ -104,48 +141,3 @@ def cleanup_expired_approvals():
             db.commit()
 
         return {"expired": len(expired)}
-
-
-@shared_task
-def resume_waiting_workflows():
-    """Resume workflows that were waiting for approval.
-
-    Called after an approval is granted.
-    """
-    with get_db_context() as db:
-        # Find workflow runs waiting for approval that have been approved
-        from sqlalchemy import and_
-
-        waiting_runs = db.query(WorkflowRun).filter(
-            WorkflowRun.status == "waiting_approval"
-        ).all()
-
-        resumed = 0
-        for run in waiting_runs:
-            # Check if all pending approvals for this run are resolved
-            pending = db.query(Approval).filter(
-                Approval.workflow_run_id == run.id,
-                Approval.status == "pending",
-            ).count()
-
-            if pending == 0:
-                # Check if any were rejected
-                rejected = db.query(Approval).filter(
-                    Approval.workflow_run_id == run.id,
-                    Approval.status == "rejected",
-                ).count()
-
-                if rejected > 0:
-                    run.status = "failed"
-                    run.error_message = "Approval rejected"
-                else:
-                    # Resume workflow
-                    run.status = "running"
-                    from tasks.workflow_executor import execute_workflow
-                    execute_workflow.delay(run.id)
-                    resumed += 1
-
-        if waiting_runs:
-            db.commit()
-
-        return {"checked": len(waiting_runs), "resumed": resumed}

@@ -64,22 +64,42 @@ class GeminiClient:
         Args:
             token_manager: Token manager for Apigee OAuth (uses global if not provided)
             api_url: Gemini API URL via Apigee (or GEMINI_API_URL env var)
+                     Can be full Vertex AI URL or base URL with /models/{model} appended
             model: Default model to use
         """
         self.token_manager = token_manager or get_token_manager()
-        self.api_url = (api_url or os.getenv("GEMINI_API_URL", "")).rstrip("/")
+        raw_url = (api_url or os.getenv("GEMINI_API_URL", "")).rstrip("/")
         self.default_model = model
 
-        if not self.api_url:
+        if not raw_url:
             raise ValueError("GEMINI_API_URL environment variable required")
+
+        # Check if URL already includes a model path (Vertex AI format)
+        # Vertex AI format: .../publishers/google/models/{model}
+        if "/publishers/google/models/" in raw_url:
+            # Extract base URL before the model
+            parts = raw_url.split("/publishers/google/models/")
+            self.api_url = parts[0] + "/publishers/google/models"
+            # Override default model if specified in URL
+            if len(parts) > 1 and parts[1]:
+                self.default_model = parts[1].split("/")[0]
+        else:
+            self.api_url = raw_url
 
     def _get_headers(self) -> Dict[str, str]:
         """Get request headers with current OAuth token."""
         token = self.token_manager.get_token()
-        return {
+        headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
+
+        # Add user_email header if configured (required by some Apigee endpoints)
+        user_email = os.getenv("GEMINI_USER_EMAIL")
+        if user_email:
+            headers["user_email"] = user_email
+
+        return headers
 
     def _convert_messages_to_gemini(
         self, messages: List[Dict[str, Any]]
@@ -88,9 +108,24 @@ class GeminiClient:
 
         Returns:
             Tuple of (system_instruction, contents)
+
+        Note: Gemini requires that all function responses for a given function call
+        turn be sent in a single "user" message with multiple functionResponse parts.
+        This method groups consecutive tool responses together.
         """
         system_instruction = None
         contents = []
+        pending_tool_responses = []
+
+        def flush_tool_responses():
+            """Add any pending tool responses as a single user message."""
+            nonlocal pending_tool_responses
+            if pending_tool_responses:
+                contents.append({
+                    "role": "user",
+                    "parts": pending_tool_responses
+                })
+                pending_tool_responses = []
 
         for msg in messages:
             role = msg["role"]
@@ -99,11 +134,13 @@ class GeminiClient:
             if role == "system":
                 system_instruction = content
             elif role == "user":
+                flush_tool_responses()
                 contents.append({
                     "role": "user",
                     "parts": [{"text": content}]
                 })
             elif role == "assistant":
+                flush_tool_responses()
                 parts = []
                 if content:
                     parts.append({"text": content})
@@ -126,16 +163,16 @@ class GeminiClient:
                         "parts": parts
                     })
             elif role == "tool":
-                # Tool response
-                contents.append({
-                    "role": "user",
-                    "parts": [{
-                        "functionResponse": {
-                            "name": msg.get("name", "unknown"),
-                            "response": {"result": content}
-                        }
-                    }]
+                # Accumulate tool responses - they'll be grouped together
+                pending_tool_responses.append({
+                    "functionResponse": {
+                        "name": msg.get("name", "unknown"),
+                        "response": {"result": content}
+                    }
                 })
+
+        # Flush any remaining tool responses at the end
+        flush_tool_responses()
 
         return system_instruction, contents
 
@@ -237,7 +274,8 @@ class GeminiClient:
             body["tools"] = self._convert_tools_to_gemini(tools)
 
         # Make request
-        url = f"{self.api_url}/models/{model}:generateContent"
+        # URL format: {base_url}/{model}:generateContent for Vertex AI
+        url = f"{self.api_url}/{model}:generateContent"
 
         try:
             with httpx.Client(timeout=120.0) as client:
@@ -304,7 +342,7 @@ class GeminiClient:
         if tools:
             body["tools"] = self._convert_tools_to_gemini(tools)
 
-        url = f"{self.api_url}/models/{model}:streamGenerateContent?alt=sse"
+        url = f"{self.api_url}/{model}:streamGenerateContent?alt=sse"
 
         try:
             with httpx.Client(timeout=120.0) as client:
@@ -366,9 +404,12 @@ class GeminiClient:
         if tools:
             body["tools"] = self._convert_tools_to_gemini(tools)
 
-        url = f"{self.api_url}/models/{model}:generateContent"
+        url = f"{self.api_url}/{model}:generateContent"
 
         async with httpx.AsyncClient(timeout=120.0) as client:
+            logger.debug(f"Gemini request URL: {url}")
+            logger.debug(f"Gemini request body: {json.dumps(body)[:500]}")
+
             response = await client.post(
                 url,
                 headers=self._get_headers(),
@@ -382,6 +423,9 @@ class GeminiClient:
                     headers=self._get_headers(),
                     json=body,
                 )
+
+            if not response.is_success:
+                logger.error(f"Gemini API error {response.status_code}: {response.text}")
 
             response.raise_for_status()
             return self._parse_response(response.json())
@@ -412,7 +456,7 @@ class GeminiClient:
         if tools:
             body["tools"] = self._convert_tools_to_gemini(tools)
 
-        url = f"{self.api_url}/models/{model}:streamGenerateContent?alt=sse"
+        url = f"{self.api_url}/{model}:streamGenerateContent?alt=sse"
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(

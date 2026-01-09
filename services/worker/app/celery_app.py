@@ -14,10 +14,11 @@ celery_app = Celery(
     broker=REDIS_URL,
     backend=REDIS_URL,
     include=[
-        "tasks.workflow_executor",
+        "tasks.agent_executor",
         "tasks.knowledge_indexer",
         "tasks.scheduled_runs",
         "tasks.notifications",
+        "tasks.job_executor",
     ],
 )
 
@@ -37,8 +38,8 @@ celery_app.conf.update(
 
 # Beat schedule for periodic tasks
 celery_app.conf.beat_schedule = {
-    "check-scheduled-workflows": {
-        "task": "tasks.scheduled_runs.check_scheduled_workflows",
+    "check-scheduled-tasks": {
+        "task": "tasks.scheduled_runs.check_scheduled_tasks",
         "schedule": 60.0,  # Every minute
     },
     "cleanup-expired-approvals": {

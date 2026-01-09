@@ -95,7 +95,7 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
 <script>
 let pendingApprovals = [];
 let historyApprovals = [];
@@ -116,8 +116,8 @@ async function loadApprovals() {
             api.get('/api/approvals?status=resolved&limit=50')
         ]);
 
-        pendingApprovals = pending || [];
-        historyApprovals = history || [];
+        pendingApprovals = pending.items || [];
+        historyApprovals = history.items || [];
 
         renderPendingApprovals();
         renderHistory();

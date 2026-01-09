@@ -161,6 +161,18 @@ const apiClient = {
     }
 };
 
+// Create global api alias for templates
+const api = apiClient;
+
+// Global showToast function for templates
+function showToast(message, type = 'info') {
+    if (typeof toast !== 'undefined') {
+        toast.show(message, type);
+    } else {
+        console.log(`[${type}] ${message}`);
+    }
+}
+
 // Export for modules
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = apiClient;

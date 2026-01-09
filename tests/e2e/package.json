@@ -1,0 +1,16 @@
+{
+  "name": "netagent-e2e-tests",
+  "version": "1.0.0",
+  "description": "E2E tests for NetAgent using Playwright",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:headed": "npx playwright test --headed",
+    "test:debug": "npx playwright test --debug",
+    "test:ui": "npx playwright test --ui",
+    "test:jobs": "npx playwright test tests/jobs.spec.js",
+    "report": "npx playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0"
+  }
+}

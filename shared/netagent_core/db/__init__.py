@@ -1,6 +1,6 @@
 """Database module."""
 
-from .database import engine, SessionLocal, Base, get_db
+from .database import engine, SessionLocal, Base, get_db, init_db, get_db_context
 from .models import (
     User,
     Agent,
@@ -19,6 +19,11 @@ from .models import (
     Approval,
     AuditLog,
     Settings,
+    ScheduledTask,
+    Job,
+    JobTask,
+    Memory,
+    SessionSummary,
 )
 
 __all__ = [
@@ -26,6 +31,8 @@ __all__ = [
     "SessionLocal",
     "Base",
     "get_db",
+    "init_db",
+    "get_db_context",
     "User",
     "Agent",
     "AgentTemplate",
@@ -43,4 +50,9 @@ __all__ = [
     "Approval",
     "AuditLog",
     "Settings",
+    "ScheduledTask",
+    "Job",
+    "JobTask",
+    "Memory",
+    "SessionSummary",
 ]

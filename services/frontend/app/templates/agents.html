@@ -140,7 +140,7 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
 <script>
 const agentTypeIcons = {
     'triage': 'bi-signpost-split',
@@ -157,7 +157,8 @@ const agentTypeColors = {
     'ospf': 'success',
     'validator': 'warning',
     'docs': 'secondary',
-    'custom': 'dark'
+    'documentation': 'secondary',
+    'custom': 'primary'
 };
 
 let agents = [];
@@ -187,7 +188,7 @@ document.addEventListener('DOMContentLoaded', function() {
 async function loadAgents() {
     try {
         const response = await api.get('/api/agents');
-        agents = response;
+        agents = response.items || response || [];
         renderAgents();
     } catch (error) {
         showToast('Failed to load agents', 'error');
@@ -197,7 +198,7 @@ async function loadAgents() {
 async function loadTemplates() {
     try {
         const response = await api.get('/api/agents/templates');
-        templates = response;
+        templates = response.items || response || [];
         renderTemplates();
     } catch (error) {
         console.error('Failed to load templates:', error);
@@ -240,7 +241,7 @@ function renderAgents() {
                             </button>
                             <ul class="dropdown-menu dropdown-menu-end">
                                 <li><a class="dropdown-item" href="/agents/${agent.id}/chat"><i class="bi bi-chat-dots me-2"></i>Chat</a></li>
-                                <li><a class="dropdown-item" href="/agents/${agent.id}/edit"><i class="bi bi-pencil me-2"></i>Edit</a></li>
+                                <li><a class="dropdown-item" href="/agents/${agent.id}"><i class="bi bi-pencil me-2"></i>Edit</a></li>
                                 <li><a class="dropdown-item" href="#" onclick="duplicateAgent(${agent.id})"><i class="bi bi-copy me-2"></i>Duplicate</a></li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><a class="dropdown-item text-danger" href="#" onclick="showDeleteModal(${agent.id}, '${escapeHtml(agent.name)}')"><i class="bi bi-trash me-2"></i>Delete</a></li>
@@ -297,7 +298,7 @@ function renderTemplates() {
     const grid = document.getElementById('templates-grid');
     grid.innerHTML = templates.map(template => `
         <div class="col-md-6">
-            <a href="/agents/create?template=${template.id}" class="card template-card h-100 text-decoration-none">
+            <a href="/agents/new?template=${template.id}" class="card template-card h-100 text-decoration-none">
                 <div class="card-body">
                     <div class="d-flex align-items-center mb-2">
                         <div class="agent-icon bg-${agentTypeColors[template.agent_type] || 'secondary'} bg-opacity-10 text-${agentTypeColors[template.agent_type] || 'secondary'} rounded p-2 me-3">

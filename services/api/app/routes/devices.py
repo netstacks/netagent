@@ -264,23 +264,59 @@ async def test_connection(
     if not username or not password:
         raise HTTPException(status_code=400, detail="Credentials required")
 
-    # TODO: Implement actual SSH test with netmiko
-    # from netmiko import ConnectHandler
-    # try:
-    #     device = {
-    #         'device_type': 'autodetect',
-    #         'host': data.hostname,
-    #         'username': username,
-    #         'password': password,
-    #     }
-    #     with ConnectHandler(**device) as conn:
-    #         output = conn.send_command('show version')
-    #     return {"success": True, "message": "Connection successful"}
-    # except Exception as e:
-    #     return {"success": False, "message": str(e)}
+    # Test SSH connection with netmiko
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from netmiko import ConnectHandler
+    from netmiko.exceptions import (
+        NetMikoTimeoutException,
+        NetMikoAuthenticationException,
+    )
 
-    return {
-        "success": True,
-        "message": "Connection test not yet implemented",
-        "hostname": data.hostname,
-    }
+    def _test_ssh_connection():
+        """Run SSH test in thread pool (netmiko is blocking)."""
+        device = {
+            'device_type': 'autodetect',
+            'host': data.hostname,
+            'username': username,
+            'password': password,
+            'timeout': 10,
+            'auth_timeout': 10,
+        }
+        try:
+            with ConnectHandler(**device) as conn:
+                # Try to get basic info
+                output = conn.send_command('show version', read_timeout=10)
+                device_type = conn.device_type
+                return {
+                    "success": True,
+                    "message": "Connection successful",
+                    "hostname": data.hostname,
+                    "device_type": device_type,
+                    "output_preview": output[:200] if output else None,
+                }
+        except NetMikoAuthenticationException as e:
+            return {
+                "success": False,
+                "message": f"Authentication failed: {str(e)}",
+                "hostname": data.hostname,
+            }
+        except NetMikoTimeoutException as e:
+            return {
+                "success": False,
+                "message": f"Connection timeout: {str(e)}",
+                "hostname": data.hostname,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Connection failed: {str(e)}",
+                "hostname": data.hostname,
+            }
+
+    # Run the blocking netmiko call in a thread pool
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        result = await loop.run_in_executor(executor, _test_ssh_connection)
+
+    return result

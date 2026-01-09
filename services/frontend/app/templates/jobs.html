@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+{% block title %}Jobs - NetAgent{% endblock %}
+{% block page_title %}Jobs{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <p class="text-secondary mb-0">Orchestrate multi-step tasks with AI agents</p>
+        </div>
+        <a href="/jobs/new" class="btn btn-primary">
+            <i class="fas fa-plus me-2"></i>New Job
+        </a>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label">Status</label>
+                    <select id="filter-status" class="form-select">
+                        <option value="">All Statuses</option>
+                        <option value="pending">Pending</option>
+                        <option value="queued">Queued</option>
+                        <option value="executing">Executing</option>
+                        <option value="completed">Completed</option>
+                        <option value="failed">Failed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button onclick="loadJobs()" class="btn btn-secondary">
+                        <i class="fas fa-filter me-1"></i>Apply
+                    </button>
+                </div>
+                <!-- Bulk Actions -->
+                <div class="col-md-5 ms-auto">
+                    <div id="bulk-actions" class="d-none">
+                        <span class="me-2 text-muted"><span id="selected-count">0</span> selected</span>
+                        <div class="btn-group">
+                            <button onclick="bulkCancel()" class="btn btn-outline-warning btn-sm" title="Cancel selected jobs">
+                                <i class="fas fa-times me-1"></i>Cancel
+                            </button>
+                            <button onclick="bulkDelete()" class="btn btn-outline-danger btn-sm" title="Delete selected jobs">
+                                <i class="fas fa-trash me-1"></i>Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Jobs Table -->
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0" id="jobs-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 40px;">
+                                <input type="checkbox" class="form-check-input" id="select-all" onchange="toggleSelectAll(this)">
+                            </th>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Tasks</th>
+                            <th>Mode</th>
+                            <th>Created</th>
+                            <th>Duration</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="jobs-tbody">
+                        <tr>
+                            <td colspan="9" class="text-center py-4">
+                                <div class="spinner-border spinner-border-sm" role="status"></div>
+                                <span class="ms-2">Loading jobs...</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const STATUS_COLORS = {
+    'pending': 'secondary',
+    'queued': 'info',
+    'executing': 'primary',
+    'validating': 'warning',
+    'awaiting_approval': 'warning',
+    'delivering': 'info',
+    'completed': 'success',
+    'failed': 'danger',
+    'cancelled': 'dark'
+};
+
+async function loadJobs() {
+    const status = document.getElementById('filter-status').value;
+    const params = new URLSearchParams();
+    if (status) params.append('status', status);
+
+    try {
+        const response = await fetch(`/api/jobs/?${params}`);
+        if (!response.ok) throw new Error('Failed to load jobs');
+        const jobs = await response.json();
+        renderJobsTable(jobs);
+    } catch (error) {
+        console.error('Failed to load jobs:', error);
+        showToast('Failed to load jobs', 'error');
+    }
+}
+
+// Track selected jobs
+let selectedJobs = new Set();
+
+function renderJobsTable(jobs) {
+    const tbody = document.getElementById('jobs-tbody');
+    selectedJobs.clear();
+    updateBulkActionsUI();
+
+    if (jobs.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="9" class="text-center py-4 text-muted">
+                    <i class="fas fa-inbox fa-2x mb-2 d-block"></i>
+                    No jobs found
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = jobs.map(job => `
+        <tr>
+            <td>
+                <input type="checkbox" class="form-check-input job-checkbox"
+                       data-job-id="${job.id}" data-job-status="${job.status}"
+                       onchange="toggleJobSelection(${job.id}, '${job.status}', this.checked)">
+            </td>
+            <td><code>#${job.id}</code></td>
+            <td>
+                <a href="/jobs/${job.id}" class="text-decoration-none fw-medium">
+                    ${escapeHtml(job.name)}
+                </a>
+            </td>
+            <td>
+                <span class="badge bg-${STATUS_COLORS[job.status] || 'secondary'}">
+                    ${job.status.replace('_', ' ')}
+                </span>
+            </td>
+            <td>
+                <span class="text-success">${job.completed_tasks}</span>
+                <span class="text-muted">/</span>
+                <span>${job.total_tasks}</span>
+                ${job.failed_tasks > 0 ? `<span class="text-danger ms-1">(${job.failed_tasks} failed)</span>` : ''}
+            </td>
+            <td>
+                <span class="badge bg-secondary">${job.execution_mode}</span>
+                ${job.execution_mode === 'batch' ? `<small class="text-muted">(${job.batch_size})</small>` : ''}
+            </td>
+            <td>${formatDate(job.created_at)}</td>
+            <td>${formatDuration(job)}</td>
+            <td>
+                <div class="btn-group btn-group-sm">
+                    <a href="/jobs/${job.id}" class="btn btn-outline-primary" title="View">
+                        <i class="fas fa-eye"></i>
+                    </a>
+                    ${job.status === 'pending' ? `
+                        <a href="/jobs/${job.id}/edit" class="btn btn-outline-secondary" title="Edit">
+                            <i class="fas fa-edit"></i>
+                        </a>
+                        <button onclick="startJob(${job.id})" class="btn btn-outline-success" title="Start">
+                            <i class="fas fa-play"></i>
+                        </button>
+                    ` : ''}
+                    ${['queued', 'executing', 'pending'].includes(job.status) ? `
+                        <button onclick="cancelJob(${job.id})" class="btn btn-outline-danger" title="Cancel">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    ` : ''}
+                    ${['failed', 'cancelled'].includes(job.status) ? `
+                        <button onclick="retryJob(${job.id})" class="btn btn-outline-warning" title="Retry Failed">
+                            <i class="fas fa-redo"></i>
+                        </button>
+                    ` : ''}
+                    ${['completed', 'failed', 'cancelled'].includes(job.status) ? `
+                        <button onclick="rerunJob(${job.id})" class="btn btn-outline-primary" title="Rerun All">
+                            <i class="fas fa-sync"></i>
+                        </button>
+                        <button onclick="deleteJob(${job.id})" class="btn btn-outline-danger" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function toggleSelectAll(checkbox) {
+    const jobCheckboxes = document.querySelectorAll('.job-checkbox');
+    jobCheckboxes.forEach(cb => {
+        cb.checked = checkbox.checked;
+        const jobId = parseInt(cb.dataset.jobId);
+        const jobStatus = cb.dataset.jobStatus;
+        if (checkbox.checked) {
+            selectedJobs.add(jobId);
+        } else {
+            selectedJobs.delete(jobId);
+        }
+    });
+    updateBulkActionsUI();
+}
+
+function toggleJobSelection(jobId, status, isSelected) {
+    if (isSelected) {
+        selectedJobs.add(jobId);
+    } else {
+        selectedJobs.delete(jobId);
+    }
+    updateBulkActionsUI();
+}
+
+function updateBulkActionsUI() {
+    const bulkActions = document.getElementById('bulk-actions');
+    const selectedCount = document.getElementById('selected-count');
+
+    if (selectedJobs.size > 0) {
+        bulkActions.classList.remove('d-none');
+        selectedCount.textContent = selectedJobs.size;
+    } else {
+        bulkActions.classList.add('d-none');
+    }
+
+    // Update select-all checkbox state
+    const selectAll = document.getElementById('select-all');
+    const jobCheckboxes = document.querySelectorAll('.job-checkbox');
+    if (jobCheckboxes.length > 0) {
+        selectAll.checked = selectedJobs.size === jobCheckboxes.length;
+        selectAll.indeterminate = selectedJobs.size > 0 && selectedJobs.size < jobCheckboxes.length;
+    }
+}
+
+async function bulkDelete() {
+    if (selectedJobs.size === 0) return;
+
+    if (!confirm(`Delete ${selectedJobs.size} selected job(s)? This action cannot be undone.`)) return;
+
+    try {
+        const response = await fetch('/api/jobs/bulk/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_ids: Array.from(selectedJobs) })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to delete jobs');
+        }
+
+        const result = await response.json();
+        if (result.success.length > 0) {
+            showToast(`Deleted ${result.success.length} job(s)`, 'success');
+        }
+        if (result.failed.length > 0) {
+            showToast(`Failed to delete ${result.failed.length} job(s)`, 'warning');
+        }
+
+        selectedJobs.clear();
+        loadJobs();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function bulkCancel() {
+    if (selectedJobs.size === 0) return;
+
+    if (!confirm(`Cancel ${selectedJobs.size} selected job(s)?`)) return;
+
+    try {
+        const response = await fetch('/api/jobs/bulk/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_ids: Array.from(selectedJobs) })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to cancel jobs');
+        }
+
+        const result = await response.json();
+        if (result.success.length > 0) {
+            showToast(`Cancelled ${result.success.length} job(s)`, 'success');
+        }
+        if (result.failed.length > 0) {
+            showToast(`${result.failed.length} job(s) could not be cancelled`, 'warning');
+        }
+
+        selectedJobs.clear();
+        loadJobs();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+}
+
+function formatDuration(job) {
+    if (!job.started_at) return '-';
+    const start = new Date(job.started_at);
+    const end = job.completed_at ? new Date(job.completed_at) : new Date();
+    const seconds = Math.floor((end - start) / 1000);
+
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function startJob(jobId) {
+    if (!confirm('Start this job?')) return;
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/start`, { method: 'POST' });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to start job');
+        }
+        showToast('Job started', 'success');
+        loadJobs();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function cancelJob(jobId) {
+    if (!confirm('Cancel this job?')) return;
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to cancel job');
+        }
+        showToast('Job cancelled', 'success');
+        loadJobs();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function retryJob(jobId) {
+    if (!confirm('Retry failed tasks only?')) return;
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/retry`, { method: 'POST' });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to retry job');
+        }
+        showToast('Job queued for retry', 'success');
+        loadJobs();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function rerunJob(jobId) {
+    if (!confirm('Rerun all tasks from scratch?')) return;
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/rerun`, { method: 'POST' });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to rerun job');
+        }
+        showToast('Job queued for rerun', 'success');
+        loadJobs();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function deleteJob(jobId) {
+    if (!confirm('Delete this job? This action cannot be undone.')) return;
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to delete job');
+        }
+        showToast('Job deleted', 'success');
+        loadJobs();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+// Load jobs on page load
+document.addEventListener('DOMContentLoaded', loadJobs);
+
+// Auto-refresh every 10 seconds (SSE endpoint not yet implemented)
+setInterval(loadJobs, 10000);
+</script>
+{% endblock %}

@@ -257,6 +257,88 @@ async def list_server_tools(
     }
 
 
+class MCPTestRequest(BaseModel):
+    """Request for testing MCP server connectivity."""
+    base_url: str
+    auth_type: Optional[str] = None
+    auth_token: Optional[str] = None
+
+
+@router.post("/test-discover")
+async def test_discover_tools(
+    data: MCPTestRequest,
+    user: ALBUser = Depends(get_current_user),
+):
+    """Test MCP server discovery without creating a server record.
+
+    Useful for validating connectivity before adding a server.
+    """
+    try:
+        client = MCPClient(
+            base_url=data.base_url,
+            auth_type=data.auth_type,
+            auth_token=data.auth_token,
+        )
+
+        tools = await client.list_tools()
+
+        return {
+            "status": "success",
+            "tools": tools,
+            "count": len(tools),
+        }
+
+    except MCPError as e:
+        raise HTTPException(status_code=502, detail=f"MCP error: {e.message}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Connection failed: {str(e)}")
+
+
+class MCPToolCallRequest(BaseModel):
+    """Request for calling an MCP tool."""
+    tool_name: str
+    arguments: dict = {}
+
+
+@router.post("/servers/{server_id}/call")
+async def call_server_tool(
+    server_id: int,
+    data: MCPToolCallRequest,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Call a tool on an MCP server directly (for testing).
+
+    This endpoint allows testing MCP tool execution before using in agents.
+    """
+    server = db.query(MCPServer).filter(MCPServer.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+
+    auth_token = None
+    if server.auth_config_encrypted:
+        auth_token = decrypt_value(server.auth_config_encrypted)
+
+    try:
+        client = MCPClient(
+            base_url=server.base_url,
+            auth_type=server.auth_type,
+            auth_token=auth_token,
+        )
+
+        result = await client.call_tool(data.tool_name, data.arguments)
+
+        return {
+            "status": "success",
+            "result": result,
+        }
+
+    except MCPError as e:
+        raise HTTPException(status_code=502, detail=f"MCP error: {e.message}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Tool call failed: {str(e)}")
+
+
 @router.post("/servers/{server_id}/health")
 async def check_health(
     server_id: int,

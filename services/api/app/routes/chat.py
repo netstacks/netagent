@@ -456,20 +456,30 @@ async def get_live_sessions(
             AgentMessage.session_id == session.id
         ).order_by(AgentMessage.created_at.desc()).first()
 
-        # Get pending approval if waiting
+        # Get pending approval if waiting, and handle expired approvals
         pending_approval = None
+        approval_status = None
         if session.status == "waiting_approval":
+            # Look for any approval for this session
             approval = db.query(Approval).filter(
-                Approval.session_id == session.id,
-                Approval.status == "pending"
-            ).first()
+                Approval.session_id == session.id
+            ).order_by(Approval.created_at.desc()).first()
+
             if approval:
-                pending_approval = {
-                    "id": approval.id,
-                    "action_type": approval.action_type,
-                    "action_description": approval.action_description,
-                    "risk_level": approval.risk_level,
-                }
+                approval_status = approval.status
+                if approval.status == "pending":
+                    pending_approval = {
+                        "id": approval.id,
+                        "action_type": approval.action_type,
+                        "action_description": approval.action_description,
+                        "risk_level": approval.risk_level,
+                    }
+                elif approval.status == "expired":
+                    # Session is stuck in waiting_approval with expired approval
+                    # Mark the session as failed to clean up inconsistent state
+                    session.status = "failed"
+                    db.commit()
+                    continue  # Skip this session, it's now failed
 
         items.append({
             "id": session.id,
@@ -486,6 +496,176 @@ async def get_live_sessions(
         })
 
     return {"items": items, "count": len(items)}
+
+
+# Bulk operations - MUST be defined before {session_id} routes
+class BulkSessionAction(BaseModel):
+    session_ids: List[int]
+
+
+class BulkStatusUpdate(BaseModel):
+    session_ids: List[int]
+    status: str  # "completed", "failed", "cancelled"
+
+
+@router.post("/sessions/bulk/cancel")
+async def bulk_cancel_sessions(
+    data: BulkSessionAction,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Cancel multiple sessions at once."""
+    cancelled = []
+    skipped = []
+
+    for session_id in data.session_ids:
+        session = db.query(AgentSession).filter(AgentSession.id == session_id).first()
+        if not session:
+            skipped.append({"id": session_id, "reason": "not found"})
+            continue
+
+        if session.status not in ("active", "running", "waiting_approval"):
+            skipped.append({"id": session_id, "reason": f"status is {session.status}"})
+            continue
+
+        # Set cancel flag in Redis
+        set_cancel_flag(session_id)
+
+        # Update session status
+        session.status = "cancelled"
+        session.completed_at = datetime.utcnow()
+        cancelled.append(session_id)
+
+    db.commit()
+
+    # Publish event for frontend
+    if cancelled:
+        publish_live_session_event("sessions_bulk_cancelled", {
+            "session_ids": cancelled,
+            "cancelled_by": user.email,
+        })
+
+    # Audit log
+    audit_log(
+        db,
+        AuditEventType.AGENT_CHAT_COMPLETED,
+        user=user,
+        resource_type="agent_session",
+        resource_id=None,
+        action="bulk_cancel",
+        details={"cancelled": cancelled, "skipped": len(skipped), "by": user.email},
+    )
+
+    return {
+        "message": f"Cancelled {len(cancelled)} sessions",
+        "cancelled": cancelled,
+        "skipped": skipped,
+    }
+
+
+@router.post("/sessions/bulk/delete")
+async def bulk_delete_sessions(
+    data: BulkSessionAction,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Delete multiple sessions and their messages/actions."""
+    deleted = []
+    skipped = []
+
+    for session_id in data.session_ids:
+        session = db.query(AgentSession).filter(AgentSession.id == session_id).first()
+        if not session:
+            skipped.append({"id": session_id, "reason": "not found"})
+            continue
+
+        # Don't delete active sessions - cancel first
+        if session.status in ("active", "running", "waiting_approval"):
+            skipped.append({"id": session_id, "reason": "session is still active"})
+            continue
+
+        # Delete related records first
+        db.query(AgentMessage).filter(AgentMessage.session_id == session_id).delete()
+        db.query(AgentAction).filter(AgentAction.session_id == session_id).delete()
+
+        # Delete session
+        db.delete(session)
+        deleted.append(session_id)
+
+    db.commit()
+
+    # Audit log
+    audit_log(
+        db,
+        AuditEventType.AGENT_CHAT_COMPLETED,
+        user=user,
+        resource_type="agent_session",
+        resource_id=None,
+        action="bulk_delete",
+        details={"deleted": deleted, "skipped": len(skipped), "by": user.email},
+    )
+
+    return {
+        "message": f"Deleted {len(deleted)} sessions",
+        "deleted": deleted,
+        "skipped": skipped,
+    }
+
+
+@router.post("/sessions/bulk/status")
+async def bulk_update_session_status(
+    data: BulkStatusUpdate,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Update status of multiple sessions."""
+    valid_statuses = ["completed", "failed", "cancelled"]
+    if data.status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: {valid_statuses}"
+        )
+
+    updated = []
+    skipped = []
+
+    for session_id in data.session_ids:
+        session = db.query(AgentSession).filter(AgentSession.id == session_id).first()
+        if not session:
+            skipped.append({"id": session_id, "reason": "not found"})
+            continue
+
+        session.status = data.status
+        if data.status in ("completed", "failed", "cancelled"):
+            session.completed_at = datetime.utcnow()
+        updated.append(session_id)
+
+    db.commit()
+
+    # Publish event for frontend
+    if updated:
+        publish_live_session_event("sessions_bulk_updated", {
+            "session_ids": updated,
+            "new_status": data.status,
+            "updated_by": user.email,
+        })
+
+    # Audit log
+    audit_log(
+        db,
+        AuditEventType.AGENT_CHAT_COMPLETED,
+        user=user,
+        resource_type="agent_session",
+        resource_id=None,
+        action="bulk_status_update",
+        details={"updated": updated, "status": data.status, "skipped": len(skipped), "by": user.email},
+    )
+
+    return {
+        "message": f"Updated {len(updated)} sessions to {data.status}",
+        "updated": updated,
+        "skipped": skipped,
+    }
 
 
 @router.get("/sessions/{session_id}", response_model=SessionResponse)

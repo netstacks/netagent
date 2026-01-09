@@ -115,7 +115,7 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
 <script>
 let auditEntries = [];
 let currentPage = 0;
@@ -170,7 +170,7 @@ async function loadAuditLog() {
 
     try {
         const response = await api.get(`/api/audit?${params.toString()}`);
-        auditEntries = response.entries || [];
+        auditEntries = response.items || [];
         totalCount = response.total || 0;
         renderAuditTable();
         updatePagination();

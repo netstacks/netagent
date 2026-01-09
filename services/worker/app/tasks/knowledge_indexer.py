@@ -1,5 +1,6 @@
 """Knowledge base indexing tasks."""
 
+import asyncio
 import hashlib
 import logging
 from datetime import datetime
@@ -11,8 +12,21 @@ from netagent_core.db import (
     KnowledgeDocument,
     KnowledgeChunk,
 )
+from netagent_core.knowledge.confluence_client import ConfluenceClient
+from netagent_core.knowledge.embeddings import EmbeddingsClient
 
 logger = logging.getLogger(__name__)
+
+# Shared embeddings client (initialized lazily)
+_embeddings_client = None
+
+
+def get_embeddings_client() -> EmbeddingsClient:
+    """Get or create the embeddings client."""
+    global _embeddings_client
+    if _embeddings_client is None:
+        _embeddings_client = EmbeddingsClient()
+    return _embeddings_client
 
 
 @shared_task
@@ -64,7 +78,10 @@ def sync_knowledge_base(kb_id: int):
 
 
 def sync_confluence(db, kb: KnowledgeBase):
-    """Sync content from Confluence."""
+    """Sync content from Confluence.
+
+    Fetches pages from Confluence and indexes them with embeddings.
+    """
     config = kb.source_config or {}
 
     base_url = config.get("base_url")
@@ -76,50 +93,87 @@ def sync_confluence(db, kb: KnowledgeBase):
     if not all([base_url, username, api_token]):
         return {"error": "Missing Confluence configuration"}
 
-    # TODO: Implement actual Confluence API calls
-    # This is a placeholder that shows the intended structure
+    if not space_key and not parent_page_id:
+        return {"error": "Either space_key or parent_page_id is required"}
 
-    # Example Confluence API integration:
-    # import httpx
-    # from bs4 import BeautifulSoup
-    #
-    # auth = (username, api_token)
-    # headers = {"Accept": "application/json"}
-    #
-    # if parent_page_id:
-    #     # Get page and its children
-    #     url = f"{base_url}/rest/api/content/{parent_page_id}/child/page"
-    # else:
-    #     # Get all pages in space
-    #     url = f"{base_url}/rest/api/content?spaceKey={space_key}&type=page"
-    #
-    # response = httpx.get(url, auth=auth, headers=headers)
-    # pages = response.json().get("results", [])
-    #
-    # for page in pages:
-    #     page_id = page["id"]
-    #     title = page["title"]
-    #
-    #     # Get page content
-    #     content_url = f"{base_url}/rest/api/content/{page_id}?expand=body.storage"
-    #     content_response = httpx.get(content_url, auth=auth, headers=headers)
-    #     html_content = content_response.json()["body"]["storage"]["value"]
-    #
-    #     # Parse HTML and extract text
-    #     soup = BeautifulSoup(html_content, "html.parser")
-    #     text = soup.get_text(separator="\n", strip=True)
-    #
-    #     # Index the page
-    #     index_document(db, kb, page_id, title, text, page_url)
-
-    logger.info("Confluence sync placeholder - implement actual API integration")
-    return {"message": "Confluence sync placeholder"}
+    # Run async confluence fetch in sync context
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(
+            _sync_confluence_async(db, kb, base_url, username, api_token, space_key, parent_page_id)
+        )
+    finally:
+        loop.close()
 
 
-def index_document(db, kb: KnowledgeBase, source_id: str, title: str, content: str, url: str = None):
-    """Index a document into the knowledge base.
+async def _sync_confluence_async(
+    db,
+    kb: KnowledgeBase,
+    base_url: str,
+    username: str,
+    api_token: str,
+    space_key: str = None,
+    parent_page_id: str = None,
+):
+    """Async implementation of Confluence sync."""
+    client = ConfluenceClient(
+        base_url=base_url,
+        username=username,
+        api_token=api_token,
+    )
 
-    Creates embeddings and stores in pgvector.
+    pages = []
+
+    try:
+        if parent_page_id:
+            # Get pages under a parent page (recursive)
+            logger.info(f"Fetching page tree under page {parent_page_id}")
+            pages = await client.get_page_tree(parent_page_id)
+        elif space_key:
+            # Get all pages in a space
+            logger.info(f"Fetching pages from space {space_key}")
+            pages = await client.get_space_pages(space_key)
+
+        logger.info(f"Found {len(pages)} pages to index")
+
+        indexed = 0
+        failed = 0
+
+        for page in pages:
+            try:
+                # Index each page
+                await index_document_async(
+                    db=db,
+                    kb=kb,
+                    source_id=page.id,
+                    title=page.title,
+                    content=page.body,
+                    url=page.url,
+                )
+                indexed += 1
+                logger.debug(f"Indexed page: {page.title}")
+            except Exception as e:
+                logger.error(f"Failed to index page {page.title}: {e}")
+                failed += 1
+
+        return {
+            "pages_found": len(pages),
+            "indexed": indexed,
+            "failed": failed,
+        }
+
+    except Exception as e:
+        logger.exception(f"Confluence sync error: {e}")
+        return {"error": str(e)}
+
+
+async def index_document_async(
+    db, kb: KnowledgeBase, source_id: str, title: str, content: str, url: str = None
+):
+    """Index a document into the knowledge base (async version).
+
+    Creates embeddings using local embedding server and stores in pgvector.
     """
     # Calculate content hash for change detection
     content_hash = hashlib.sha256(content.encode()).hexdigest()
@@ -152,26 +206,56 @@ def index_document(db, kb: KnowledgeBase, source_id: str, title: str, content: s
     doc.content_hash = content_hash
     doc.last_synced_at = datetime.utcnow()
 
+    # Skip empty content
+    if not content or not content.strip():
+        db.commit()
+        return doc
+
     # Chunk the content
     chunks = chunk_text(content, chunk_size=1000, overlap=200)
 
-    # Generate embeddings and store chunks
-    for i, chunk_text in enumerate(chunks):
-        # TODO: Generate embedding using Gemini
-        # embedding = await generate_embedding(chunk_text)
-        embedding = None  # Placeholder
+    if not chunks:
+        db.commit()
+        return doc
 
+    # Generate embeddings in batch using Gemini
+    embeddings_client = get_embeddings_client()
+    try:
+        embeddings = await embeddings_client.embed_batch(chunks)
+        logger.debug(f"Generated {len(embeddings)} embeddings for {title}")
+    except Exception as e:
+        logger.error(f"Failed to generate embeddings for {title}: {e}")
+        # Use empty embeddings on failure
+        embeddings = [None] * len(chunks)
+
+    # Store chunks with embeddings
+    for i, (chunk_content, embedding) in enumerate(zip(chunks, embeddings)):
         chunk = KnowledgeChunk(
             document_id=doc.id,
-            content=chunk_text,
+            content=chunk_content,
             chunk_index=i,
             embedding=embedding,
-            metadata={"title": title, "chunk_index": i},
+            chunk_metadata={"title": title, "chunk_index": i, "source_url": url},
         )
         db.add(chunk)
 
     db.commit()
     return doc
+
+
+def index_document(db, kb: KnowledgeBase, source_id: str, title: str, content: str, url: str = None):
+    """Index a document into the knowledge base (sync wrapper).
+
+    Creates embeddings using local embedding server and stores in pgvector.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(
+            index_document_async(db, kb, source_id, title, content, url)
+        )
+    finally:
+        loop.close()
 
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list:

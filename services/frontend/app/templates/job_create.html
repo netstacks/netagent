@@ -1,0 +1,607 @@
+{% extends "base.html" %}
+{% block title %}{% if job_id %}{% if job_status and job_status != 'pending' %}Clone Job{% else %}Edit Job{% endif %}{% else %}Create Job{% endif %} - NetAgent{% endblock %}
+{% block page_title %}{% if job_id %}{% if job_status and job_status != 'pending' %}Clone Job{% else %}Edit Job{% endif %}{% else %}Create Job{% endif %}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .task-card {
+        border-left: 3px solid var(--bs-primary);
+        transition: all 0.2s ease;
+    }
+    .task-card:hover {
+        border-left-color: var(--bs-info);
+    }
+    .task-card .card-header {
+        cursor: move;
+    }
+    .task-card .remove-task {
+        opacity: 0.5;
+        transition: opacity 0.2s;
+    }
+    .task-card:hover .remove-task {
+        opacity: 1;
+    }
+    .natural-input-section {
+        border: 2px dashed var(--bs-secondary);
+        border-radius: 0.375rem;
+        padding: 1.5rem;
+        background: rgba(var(--bs-secondary-rgb), 0.05);
+    }
+    .natural-input-section:focus-within {
+        border-color: var(--bs-primary);
+        background: rgba(var(--bs-primary-rgb), 0.05);
+    }
+    .drag-over {
+        border-color: var(--bs-info) !important;
+        background: rgba(var(--bs-info-rgb), 0.1) !important;
+    }
+    .tasks-container {
+        min-height: 100px;
+    }
+    .agent-select {
+        min-width: 150px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex align-items-center gap-3">
+            <a href="/jobs" class="btn btn-sm btn-outline-secondary">
+                <i class="fas fa-arrow-left me-1"></i>Back
+            </a>
+            <h2 class="mb-0">{% if job_id %}{% if job_status and job_status != 'pending' %}Clone Job{% else %}Edit Job{% endif %}{% else %}Create New Job{% endif %}</h2>
+        </div>
+    </div>
+
+    <form id="job-form">
+        <div class="row">
+            <!-- Main Column -->
+            <div class="col-lg-8">
+                <!-- Natural Language Input -->
+                <div class="natural-input-section mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <label class="form-label mb-0 fw-semibold">
+                            <i class="fas fa-magic me-1 text-primary"></i>Describe Your Job
+                        </label>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="parseNaturalLanguage()">
+                            <i class="fas fa-wand-magic-sparkles me-1"></i>Parse to Tasks
+                        </button>
+                    </div>
+                    <textarea id="natural-input" class="form-control bg-transparent border-0 p-0" rows="3"
+                              placeholder="Describe what you want to accomplish in plain English. For example: 'First check the health of all core switches, then backup their configurations, and finally send a summary to #network-ops on Slack.'"></textarea>
+                </div>
+
+                <!-- Tasks Section -->
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="mb-0"><i class="fas fa-tasks me-2"></i>Tasks</h5>
+                    <button type="button" class="btn btn-sm btn-outline-success" onclick="addTaskCard()">
+                        <i class="fas fa-plus me-1"></i>Add Task
+                    </button>
+                </div>
+
+                <div id="tasks-container" class="tasks-container mb-4">
+                    <!-- Task cards will be added here -->
+                </div>
+
+                <!-- Submit Buttons -->
+                <div class="d-flex gap-2 mb-4">
+                    <button type="submit" class="btn btn-primary btn-lg">
+                        <i class="fas fa-save me-2"></i>{% if job_id %}{% if job_status and job_status != 'pending' %}Create as New{% else %}Save Changes{% endif %}{% else %}Create Job{% endif %}
+                    </button>
+                    <button type="button" class="btn btn-success btn-lg" onclick="submitAndStart()">
+                        <i class="fas fa-play me-2"></i>{% if job_id %}{% if job_status and job_status != 'pending' %}Create & Start{% else %}Save & Start{% endif %}{% else %}Create & Start{% endif %}
+                    </button>
+                </div>
+            </div>
+
+            <!-- Settings Column -->
+            <div class="col-lg-4">
+                <!-- Job Settings Card -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="fas fa-cog me-2"></i>Job Settings
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Job Name</label>
+                            <input type="text" id="job-name" class="form-control"
+                                   placeholder="e.g., Weekly Config Backup" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Execution Mode</label>
+                            <select id="execution-mode" class="form-select" onchange="updateBatchSizeVisibility()">
+                                <option value="batch" selected>Batch</option>
+                                <option value="sequential">Sequential</option>
+                                <option value="parallel">Parallel</option>
+                            </select>
+                            <small class="text-muted">How tasks are executed</small>
+                        </div>
+                        <div class="mb-3" id="batch-size-group">
+                            <label class="form-label">Batch Size</label>
+                            <input type="number" id="batch-size" class="form-control" value="5" min="1" max="50">
+                            <small class="text-muted">Tasks per batch</small>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label">On Failure</label>
+                            <select id="on-failure" class="form-select">
+                                <option value="continue" selected>Continue</option>
+                                <option value="stop">Stop</option>
+                                <option value="skip_dependents">Skip Dependents</option>
+                            </select>
+                            <small class="text-muted">Behavior when task fails</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Delivery Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-paper-plane me-2"></i>Result Delivery
+                        <small class="text-muted ms-2">(Optional)</small>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">
+                                <i class="fas fa-envelope me-1 text-muted"></i>Email Recipients
+                            </label>
+                            <input type="text" id="delivery-email" class="form-control"
+                                   placeholder="email1@example.com, email2@example.com">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">
+                                <i class="fab fa-slack me-1 text-muted"></i>Slack Channels
+                            </label>
+                            <input type="text" id="delivery-slack" class="form-control"
+                                   placeholder="#channel1, #channel2">
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label">
+                                <i class="fas fa-globe me-1 text-muted"></i>Webhook URLs
+                            </label>
+                            <textarea id="delivery-webhook" class="form-control" rows="2"
+                                      placeholder="https://example.com/webhook1&#10;https://example.com/webhook2"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let taskCounter = 0;
+let availableAgents = [];
+const jobId = {{ job_id|tojson }};  // null for create, number for edit
+const jobStatus = {{ job_status|default('null')|tojson }};  // null for create, status string for edit
+const isCloneMode = jobId && jobStatus && jobStatus !== 'pending';  // Clone if editing non-pending job
+
+// Load available agents on page load
+async function loadAgents() {
+    try {
+        const response = await fetch('/api/agents');
+        if (response.ok) {
+            const data = await response.json();
+            // API returns { items: [...] } format
+            availableAgents = Array.isArray(data) ? data : (data.items || []);
+        }
+    } catch (e) {
+        console.log('Could not load agents list');
+        availableAgents = [];
+    }
+}
+
+function getAgentOptions(selectedAgent = '') {
+    let options = '<option value="">Auto-match</option>';
+    availableAgents.forEach(agent => {
+        const selected = agent.name === selectedAgent ? 'selected' : '';
+        options += `<option value="${escapeAttr(agent.name)}" ${selected}>${escapeHtml(agent.name)}</option>`;
+    });
+    return options;
+}
+
+function addTaskCard(task = null) {
+    taskCounter++;
+    const container = document.getElementById('tasks-container');
+
+    const taskData = task || {
+        name: `Task ${taskCounter}`,
+        description: '',
+        agent_hint: ''
+    };
+
+    const cardHtml = `
+        <div class="card task-card mb-3" data-task-id="${taskCounter}" draggable="true">
+            <div class="card-header d-flex justify-content-between align-items-center py-2">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="fas fa-grip-vertical text-muted"></i>
+                    <span class="task-number badge bg-primary">${container.children.length + 1}</span>
+                    <input type="text" class="form-control form-control-sm task-name"
+                           value="${escapeAttr(taskData.name)}" placeholder="Task name" style="width: 200px;">
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <select class="form-select form-select-sm agent-select task-agent">
+                        ${getAgentOptions(taskData.agent_hint)}
+                    </select>
+                    <button type="button" class="btn btn-sm btn-outline-danger remove-task" onclick="removeTaskCard(this)" title="Remove task">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body py-2">
+                <textarea class="form-control task-description" rows="2"
+                          placeholder="Describe what this task should accomplish...">${escapeHtml(taskData.description || '')}</textarea>
+            </div>
+        </div>
+    `;
+
+    container.insertAdjacentHTML('beforeend', cardHtml);
+    updateTaskNumbers();
+
+    // Add drag and drop handlers
+    const newCard = container.lastElementChild;
+    setupDragHandlers(newCard);
+}
+
+function removeTaskCard(button) {
+    const card = button.closest('.task-card');
+    card.remove();
+    updateTaskNumbers();
+}
+
+function updateTaskNumbers() {
+    const cards = document.querySelectorAll('.task-card');
+    cards.forEach((card, index) => {
+        card.querySelector('.task-number').textContent = index + 1;
+    });
+}
+
+function setupDragHandlers(card) {
+    card.addEventListener('dragstart', handleDragStart);
+    card.addEventListener('dragend', handleDragEnd);
+    card.addEventListener('dragover', handleDragOver);
+    card.addEventListener('drop', handleDrop);
+}
+
+let draggedCard = null;
+
+function handleDragStart(e) {
+    draggedCard = this;
+    this.style.opacity = '0.5';
+    e.dataTransfer.effectAllowed = 'move';
+}
+
+function handleDragEnd(e) {
+    this.style.opacity = '1';
+    document.querySelectorAll('.task-card').forEach(card => {
+        card.classList.remove('drag-over');
+    });
+    draggedCard = null;
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    if (this !== draggedCard) {
+        this.classList.add('drag-over');
+    }
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    this.classList.remove('drag-over');
+
+    if (draggedCard && this !== draggedCard) {
+        const container = document.getElementById('tasks-container');
+        const cards = Array.from(container.children);
+        const draggedIndex = cards.indexOf(draggedCard);
+        const dropIndex = cards.indexOf(this);
+
+        if (draggedIndex < dropIndex) {
+            this.after(draggedCard);
+        } else {
+            this.before(draggedCard);
+        }
+
+        updateTaskNumbers();
+    }
+}
+
+async function parseNaturalLanguage() {
+    const input = document.getElementById('natural-input').value.trim();
+    if (!input) {
+        showToast('Enter a description first', 'warning');
+        return;
+    }
+
+    const btn = event.target.closest('button');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Parsing...';
+
+    try {
+        const response = await fetch('/api/jobs/parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ spec_text: input })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Parse failed');
+        }
+
+        const parsed = await response.json();
+
+        // Clear existing tasks
+        document.getElementById('tasks-container').innerHTML = '';
+        taskCounter = 0;
+
+        // Add parsed tasks as cards
+        if (parsed.tasks && parsed.tasks.length > 0) {
+            parsed.tasks.forEach(task => {
+                addTaskCard(task);
+            });
+            showToast(`Parsed ${parsed.tasks.length} task(s)`, 'success');
+        } else {
+            showToast('No tasks could be extracted', 'warning');
+        }
+
+        // Apply parsed config
+        if (parsed.config) {
+            if (parsed.config.mode) {
+                document.getElementById('execution-mode').value = parsed.config.mode;
+            }
+            if (parsed.config.batch_size) {
+                document.getElementById('batch-size').value = parsed.config.batch_size;
+            }
+            if (parsed.config.on_failure) {
+                document.getElementById('on-failure').value = parsed.config.on_failure;
+            }
+            updateBatchSizeVisibility();
+        }
+
+        // Apply parsed delivery settings
+        if (parsed.delivery) {
+            if (parsed.delivery.email?.length) {
+                document.getElementById('delivery-email').value = parsed.delivery.email.join(', ');
+            }
+            if (parsed.delivery.slack?.length) {
+                document.getElementById('delivery-slack').value = parsed.delivery.slack.join(', ');
+            }
+            if (parsed.delivery.webhook?.length) {
+                document.getElementById('delivery-webhook').value = parsed.delivery.webhook.join('\n');
+            }
+        }
+
+        // Generate job name from first task if empty
+        if (!document.getElementById('job-name').value && parsed.tasks?.length) {
+            document.getElementById('job-name').value = parsed.tasks[0].name || 'New Job';
+        }
+
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
+}
+
+function updateBatchSizeVisibility() {
+    const mode = document.getElementById('execution-mode').value;
+    const batchGroup = document.getElementById('batch-size-group');
+    batchGroup.style.display = mode === 'batch' ? 'block' : 'none';
+}
+
+function getTasksFromCards() {
+    const cards = document.querySelectorAll('.task-card');
+    const tasks = [];
+
+    cards.forEach((card, index) => {
+        const name = card.querySelector('.task-name').value.trim();
+        const description = card.querySelector('.task-description').value.trim();
+        const agentHint = card.querySelector('.task-agent').value;
+
+        if (name || description) {
+            tasks.push({
+                order: index + 1,
+                name: name || `Task ${index + 1}`,
+                description: description,
+                agent_hint: agentHint || null
+            });
+        }
+    });
+
+    return tasks;
+}
+
+function getDeliveryConfig() {
+    const config = {};
+
+    const email = document.getElementById('delivery-email').value.trim();
+    if (email) {
+        config.email = email.split(',').map(e => e.trim()).filter(e => e);
+    }
+
+    const slack = document.getElementById('delivery-slack').value.trim();
+    if (slack) {
+        config.slack = slack.split(',').map(s => s.trim()).filter(s => s);
+    }
+
+    const webhook = document.getElementById('delivery-webhook').value.trim();
+    if (webhook) {
+        config.webhook = webhook.split('\n').map(w => w.trim()).filter(w => w);
+    }
+
+    return Object.keys(config).length > 0 ? config : null;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function escapeAttr(text) {
+    if (!text) return '';
+    return text.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+document.getElementById('job-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    await submitJob(false);
+});
+
+async function submitAndStart() {
+    await submitJob(true);
+}
+
+async function submitJob(autoStart) {
+    const name = document.getElementById('job-name').value.trim();
+    const tasks = getTasksFromCards();
+
+    if (!name) {
+        showToast('Please enter a job name', 'error');
+        return;
+    }
+
+    if (tasks.length === 0) {
+        showToast('Please add at least one task', 'error');
+        return;
+    }
+
+    const payload = {
+        name: name,
+        tasks: tasks,
+        execution_mode: document.getElementById('execution-mode').value,
+        batch_size: parseInt(document.getElementById('batch-size').value) || 5,
+        on_failure: document.getElementById('on-failure').value,
+        delivery_config: getDeliveryConfig(),
+        auto_start: autoStart
+    };
+
+    // Keep natural language input as spec_raw for reference
+    const naturalInput = document.getElementById('natural-input').value.trim();
+    if (naturalInput) {
+        payload.spec_text = naturalInput;
+    }
+
+    try {
+        const submitBtn = document.querySelector('button[type="submit"]');
+        const startBtn = document.querySelector('button[onclick="submitAndStart()"]');
+        submitBtn.disabled = true;
+        startBtn.disabled = true;
+
+        // Use PUT for edit (pending jobs only), POST for create or clone
+        // Clone mode: editing a completed/failed/cancelled job creates a new one
+        const isEdit = jobId && !isCloneMode;
+        const url = isEdit ? `/api/jobs/${jobId}` : '/api/jobs/';
+        const method = isEdit ? 'PUT' : 'POST';
+
+        const response = await fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || `Failed to ${isEdit ? 'update' : 'create'} job`);
+        }
+
+        const job = await response.json();
+        const actionText = isCloneMode ? 'cloned' : (isEdit ? 'updated' : 'created');
+        showToast(`Job ${actionText}: ${job.name}`, 'success');
+
+        // Redirect to job detail page
+        window.location.href = `/jobs/${job.id}`;
+
+    } catch (error) {
+        showToast(error.message, 'error');
+        document.querySelector('button[type="submit"]').disabled = false;
+        document.querySelector('button[onclick="submitAndStart()"]').disabled = false;
+    }
+}
+
+// Load existing job data for edit mode
+async function loadJobData() {
+    if (!jobId) return;
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}`);
+        if (!response.ok) throw new Error('Failed to load job');
+        const job = await response.json();
+
+        // Populate form fields
+        document.getElementById('job-name').value = job.name || '';
+        document.getElementById('execution-mode').value = job.execution_mode || 'batch';
+        document.getElementById('batch-size').value = job.batch_size || 5;
+        document.getElementById('on-failure').value = job.on_failure || 'continue';
+
+        // Populate delivery config
+        if (job.delivery_config) {
+            if (job.delivery_config.email) {
+                document.getElementById('delivery-email').value = job.delivery_config.email.join(', ');
+            }
+            if (job.delivery_config.slack) {
+                document.getElementById('delivery-slack').value = job.delivery_config.slack.join(', ');
+            }
+            if (job.delivery_config.webhook) {
+                document.getElementById('delivery-webhook').value = job.delivery_config.webhook.join('\n');
+            }
+        }
+
+        // Populate natural language input if present
+        if (job.spec_raw) {
+            document.getElementById('natural-input').value = job.spec_raw;
+        }
+
+        updateBatchSizeVisibility();
+
+        // Load tasks
+        const tasksResponse = await fetch(`/api/jobs/${jobId}/tasks`);
+        if (tasksResponse.ok) {
+            const tasks = await tasksResponse.json();
+            // Sort by sequence
+            tasks.sort((a, b) => a.sequence - b.sequence);
+            tasks.forEach(task => {
+                addTaskCard({
+                    name: task.name,
+                    description: task.description || '',
+                    agent_hint: task.agent_name_hint || ''
+                });
+            });
+        }
+
+        // If no tasks were loaded, add an empty one
+        if (document.querySelectorAll('.task-card').length === 0) {
+            addTaskCard();
+        }
+
+    } catch (error) {
+        console.error('Failed to load job:', error);
+        showToast('Failed to load job data', 'error');
+    }
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadAgents();
+    updateBatchSizeVisibility();
+
+    if (jobId) {
+        // Edit mode - load existing job
+        await loadJobData();
+    } else {
+        // Create mode - add one empty task card by default
+        addTaskCard();
+    }
+});
+</script>
+{% endblock %}

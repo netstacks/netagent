@@ -9,8 +9,8 @@ services:
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
     ports:
-      - "80:80"
-      - "8080:8080"
+      - "8090:80"
+      - "8091:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -53,7 +53,7 @@ services:
       context: .
       dockerfile: services/frontend/Dockerfile
     environment:
-      - API_BASE_URL=http://api:8001
+      - API_URL=http://api:8001
       - PYTHONUNBUFFERED=1
     labels:
       - "traefik.enable=true"
@@ -79,12 +79,18 @@ services:
       - APIGEE_CLIENT_SECRET=${APIGEE_CLIENT_SECRET}
       - APIGEE_TOKEN_URL=${APIGEE_TOKEN_URL}
       - GEMINI_API_URL=${GEMINI_API_URL}
+      - GEMINI_EMBEDDING_API_URL=${GEMINI_EMBEDDING_API_URL}
+      - GEMINI_USER_EMAIL=${GEMINI_USER_EMAIL}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - SMTP_SERVER=${SMTP_SERVER:-localhost}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_FROM=${SMTP_FROM:-netagent@localhost}
       - DEV_MODE=${DEV_MODE:-false}
       - PYTHONUNBUFFERED=1
+    volumes:
+      - ./shared:/app/shared:ro
+      - ./services/api/app/routes:/app/routes:ro
+      - ./services/api/app/services:/app/services:ro
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.rule=PathPrefix(`/api`)"
@@ -102,7 +108,7 @@ services:
     build:
       context: .
       dockerfile: services/worker/Dockerfile
-    command: celery -A app.celery_app worker --loglevel=info
+    command: celery -A celery_app worker --loglevel=info
     environment:
       - DATABASE_URL=postgresql://netagent:${POSTGRES_PASSWORD:-netagent_dev}@postgres:5432/netagent
       - REDIS_URL=redis://redis:6379/0
@@ -110,7 +116,13 @@ services:
       - APIGEE_CLIENT_SECRET=${APIGEE_CLIENT_SECRET}
       - APIGEE_TOKEN_URL=${APIGEE_TOKEN_URL}
       - GEMINI_API_URL=${GEMINI_API_URL}
+      - GEMINI_EMBEDDING_API_URL=${GEMINI_EMBEDDING_API_URL}
+      - GEMINI_USER_EMAIL=${GEMINI_USER_EMAIL}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - EMBEDDING_SERVER_URL=http://embedding:8002
+      - CONFLUENCE_BASE_URL=${CONFLUENCE_BASE_URL}
+      - CONFLUENCE_USERNAME=${CONFLUENCE_USERNAME}
+      - CONFLUENCE_API_TOKEN=${CONFLUENCE_API_TOKEN}
       - PYTHONUNBUFFERED=1
     networks:
       - netagent
@@ -119,12 +131,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      embedding:
+        condition: service_healthy
 
   celery-beat:
     build:
       context: .
       dockerfile: services/worker/Dockerfile
-    command: celery -A app.celery_app beat --loglevel=info
+    command: celery -A celery_app beat --loglevel=info
     environment:
       - DATABASE_URL=postgresql://netagent:${POSTGRES_PASSWORD:-netagent_dev}@postgres:5432/netagent
       - REDIS_URL=redis://redis:6379/0
@@ -142,12 +156,29 @@ services:
       - DATABASE_URL=postgresql://netagent:${POSTGRES_PASSWORD:-netagent_dev}@postgres:5432/netagent
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
-      - API_BASE_URL=http://api:8001
+      - API_URL=http://api:8001
       - PYTHONUNBUFFERED=1
     networks:
       - netagent
     depends_on:
       - api
+
+  embedding:
+    build:
+      context: .
+      dockerfile: services/embedding/Dockerfile
+    environment:
+      - MODEL_NAME=all-MiniLM-L6-v2
+      - PAD_DIMENSIONS=768
+      - PYTHONUNBUFFERED=1
+    networks:
+      - netagent
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 networks:
   netagent:

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from netagent_core.db import get_db, Agent, Workflow, Approval, AgentSession
+from netagent_core.db import get_db, Agent, Workflow, Approval, AgentSession, KnowledgeBase
 from netagent_core.auth import get_current_user, ALBUser
 
 router = APIRouter()
@@ -40,11 +40,21 @@ async def get_dashboard_stats(
         AgentSession.created_at >= today_start
     ).count()
 
+    # Count knowledge bases
+    knowledge_bases_count = db.query(KnowledgeBase).count()
+
+    # Count total tool calls today
+    tool_calls_today = db.query(func.sum(AgentSession.tool_call_count)).filter(
+        AgentSession.created_at >= today_start
+    ).scalar() or 0
+
     return {
         "agents": agents_count,
         "workflows": workflows_count,
         "pending_approvals": pending_approvals,
         "sessions_today": sessions_today,
+        "knowledge_bases": knowledge_bases_count,
+        "tool_calls_today": tool_calls_today,
     }
 
 

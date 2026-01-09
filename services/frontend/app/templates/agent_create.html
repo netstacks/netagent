@@ -158,10 +158,11 @@
                     <h5 class="mb-0"><i class="bi bi-book me-2"></i>Knowledge Bases</h5>
                 </div>
                 <div class="card-body">
-                    <select class="form-select" id="agent-knowledge-bases" multiple size="4">
-                        <!-- Options populated dynamically -->
-                    </select>
-                    <div class="form-text">Select knowledge bases this agent can search. If none selected, agent cannot search knowledge. <br><small>Ctrl+click to select multiple.</small></div>
+                    <div id="knowledge-bases-container">
+                        <!-- Checkboxes populated dynamically -->
+                        <div class="text-muted">Loading knowledge bases...</div>
+                    </div>
+                    <div class="form-text mt-2">Select knowledge bases this agent can search.</div>
                 </div>
             </div>
 
@@ -171,10 +172,11 @@
                     <h5 class="mb-0"><i class="bi bi-plug me-2"></i>MCP Servers</h5>
                 </div>
                 <div class="card-body">
-                    <select class="form-select" id="agent-mcp-servers" multiple size="4">
-                        <!-- Options populated dynamically -->
-                    </select>
-                    <div class="form-text">Select MCP servers this agent can use. If none selected, no MCP tools available. <br><small>Ctrl+click to select multiple.</small></div>
+                    <div id="mcp-servers-container">
+                        <!-- Checkboxes populated dynamically -->
+                        <div class="text-muted">Loading MCP servers...</div>
+                    </div>
+                    <div class="form-text mt-2">Select MCP servers this agent can use for external integrations.</div>
                 </div>
             </div>
 
@@ -363,18 +365,18 @@ function populateForm(agent) {
         }
     });
 
-    // Knowledge bases multi-select
-    const kbSelect = document.getElementById('agent-knowledge-bases');
+    // Knowledge bases checkboxes
     const agentKbIds = agent.knowledge_base_ids || [];
-    Array.from(kbSelect.options).forEach(option => {
-        option.selected = agentKbIds.includes(parseInt(option.value));
+    agentKbIds.forEach(id => {
+        const checkbox = document.getElementById(`kb-${id}`);
+        if (checkbox) checkbox.checked = true;
     });
 
-    // MCP servers multi-select
-    const mcpSelect = document.getElementById('agent-mcp-servers');
+    // MCP servers checkboxes
     const agentMcpIds = agent.mcp_server_ids || [];
-    Array.from(mcpSelect.options).forEach(option => {
-        option.selected = agentMcpIds.includes(parseInt(option.value));
+    agentMcpIds.forEach(id => {
+        const checkbox = document.getElementById(`mcp-${id}`);
+        if (checkbox) checkbox.checked = true;
     });
 }
 
@@ -426,17 +428,29 @@ async function loadKnowledgeBases() {
         const response = await api.get('/api/knowledge');
         knowledgeBases = response.items || response || [];
 
-        // Populate the multi-select
-        const select = document.getElementById('agent-knowledge-bases');
-        select.innerHTML = '';
+        // Populate checkboxes
+        const container = document.getElementById('knowledge-bases-container');
+        if (knowledgeBases.length === 0) {
+            container.innerHTML = '<div class="text-muted">No knowledge bases available</div>';
+            return;
+        }
+
+        container.innerHTML = '';
         knowledgeBases.forEach(kb => {
-            const option = document.createElement('option');
-            option.value = kb.id;
-            option.textContent = kb.name;
-            select.appendChild(option);
+            const div = document.createElement('div');
+            div.className = 'form-check mb-2';
+            div.innerHTML = `
+                <input class="form-check-input" type="checkbox" id="kb-${kb.id}" data-kb-id="${kb.id}">
+                <label class="form-check-label" for="kb-${kb.id}">
+                    <strong>${escapeHtml(kb.name)}</strong>
+                    ${kb.description ? `<br><small class="text-muted">${escapeHtml(kb.description)}</small>` : ''}
+                </label>
+            `;
+            container.appendChild(div);
         });
     } catch (error) {
         console.error('Failed to load knowledge bases:', error);
+        document.getElementById('knowledge-bases-container').innerHTML = '<div class="text-danger">Failed to load</div>';
     }
 }
 
@@ -445,17 +459,29 @@ async function loadMCPServers() {
         const response = await api.get('/api/mcp/servers');
         mcpServers = response.items || response || [];
 
-        // Populate the multi-select
-        const select = document.getElementById('agent-mcp-servers');
-        select.innerHTML = '';
+        // Populate checkboxes
+        const container = document.getElementById('mcp-servers-container');
+        if (mcpServers.length === 0) {
+            container.innerHTML = '<div class="text-muted">No MCP servers available</div>';
+            return;
+        }
+
+        container.innerHTML = '';
         mcpServers.forEach(server => {
-            const option = document.createElement('option');
-            option.value = server.id;
-            option.textContent = server.name;
-            select.appendChild(option);
+            const div = document.createElement('div');
+            div.className = 'form-check mb-2';
+            div.innerHTML = `
+                <input class="form-check-input" type="checkbox" id="mcp-${server.id}" data-mcp-id="${server.id}">
+                <label class="form-check-label" for="mcp-${server.id}">
+                    <strong>${escapeHtml(server.name)}</strong>
+                    ${server.description ? `<br><small class="text-muted">${escapeHtml(server.description)}</small>` : ''}
+                </label>
+            `;
+            container.appendChild(div);
         });
     } catch (error) {
         console.error('Failed to load MCP servers:', error);
+        document.getElementById('mcp-servers-container').innerHTML = '<div class="text-danger">Failed to load</div>';
     }
 }
 
@@ -470,13 +496,17 @@ async function saveAgent(e) {
         return checkbox && checkbox.checked;
     });
 
-    // Collect selected knowledge base IDs from multi-select
-    const kbSelect = document.getElementById('agent-knowledge-bases');
-    const knowledgeBaseIds = Array.from(kbSelect.selectedOptions).map(opt => parseInt(opt.value));
+    // Collect selected knowledge base IDs from checkboxes
+    const knowledgeBaseIds = [];
+    document.querySelectorAll('#knowledge-bases-container input[type="checkbox"]:checked').forEach(cb => {
+        knowledgeBaseIds.push(parseInt(cb.dataset.kbId));
+    });
 
-    // Collect selected MCP server IDs from multi-select
-    const mcpSelect = document.getElementById('agent-mcp-servers');
-    const mcpServerIds = Array.from(mcpSelect.selectedOptions).map(opt => parseInt(opt.value));
+    // Collect selected MCP server IDs from checkboxes
+    const mcpServerIds = [];
+    document.querySelectorAll('#mcp-servers-container input[type="checkbox"]:checked').forEach(cb => {
+        mcpServerIds.push(parseInt(cb.dataset.mcpId));
+    });
 
     const data = {
         name: document.getElementById('agent-name').value,
@@ -531,13 +561,17 @@ async function testAgent() {
         return checkbox && checkbox.checked;
     });
 
-    // Collect selected knowledge base IDs from multi-select
-    const kbSelect = document.getElementById('agent-knowledge-bases');
-    const knowledgeBaseIds = Array.from(kbSelect.selectedOptions).map(opt => parseInt(opt.value));
+    // Collect selected knowledge base IDs from checkboxes
+    const knowledgeBaseIds = [];
+    document.querySelectorAll('#knowledge-bases-container input[type="checkbox"]:checked').forEach(cb => {
+        knowledgeBaseIds.push(parseInt(cb.dataset.kbId));
+    });
 
-    // Collect selected MCP server IDs from multi-select
-    const mcpSelect = document.getElementById('agent-mcp-servers');
-    const mcpServerIds = Array.from(mcpSelect.selectedOptions).map(opt => parseInt(opt.value));
+    // Collect selected MCP server IDs from checkboxes
+    const mcpServerIds = [];
+    document.querySelectorAll('#mcp-servers-container input[type="checkbox"]:checked').forEach(cb => {
+        mcpServerIds.push(parseInt(cb.dataset.mcpId));
+    });
 
     const data = {
         name: document.getElementById('agent-name').value,

@@ -46,10 +46,8 @@
                         <div class="mb-3">
                             <label class="form-label">Default Agent Model</label>
                             <select class="form-select" id="setting-default-model">
-                                <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                                <option value="gemini-2.0-pro">Gemini 2.0 Pro</option>
-                                <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-                                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                                <!-- Models loaded dynamically from API -->
+                                <option value="">Loading models...</option>
                             </select>
                         </div>
                         <div class="mb-3">
@@ -280,11 +278,54 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadModels();
     loadSettings();
 });
+
+async function loadModels() {
+    try {
+        const response = await api.get('/api/settings/models');
+        const models = response.models || [];
+        const defaultModel = response.default || 'gemini-2.5-flash';
+
+        const select = document.getElementById('setting-default-model');
+        select.innerHTML = '';
+
+        // Group models by their group property
+        const groups = {};
+        models.forEach(model => {
+            if (!groups[model.group]) {
+                groups[model.group] = [];
+            }
+            groups[model.group].push(model);
+        });
+
+        // Create optgroups
+        for (const [groupName, groupModels] of Object.entries(groups)) {
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = groupName;
+
+            groupModels.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.value;
+                option.textContent = model.label;
+                if (model.value === defaultModel) {
+                    option.selected = true;
+                }
+                optgroup.appendChild(option);
+            });
+
+            select.appendChild(optgroup);
+        }
+    } catch (error) {
+        console.error('Failed to load models:', error);
+        const select = document.getElementById('setting-default-model');
+        select.innerHTML = '<option value="gemini-2.5-flash" selected>Gemini 2.5 Flash</option>';
+    }
+}
 
 async function loadSettings() {
     try {

@@ -109,7 +109,7 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
 <script>
 let servers = [];
 let editingId = null;
@@ -141,7 +141,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function loadServers() {
     try {
-        servers = await api.get('/api/mcp/servers');
+        const response = await api.get('/api/mcp/servers');
+        servers = response.items || response || [];
         renderServers();
     } catch (error) {
         showToast('Failed to load MCP servers', 'error');
@@ -265,7 +266,7 @@ async function saveServer() {
 
     const authValue = document.getElementById('server-auth-value').value;
     if (authValue && data.auth_type !== 'none') {
-        data.auth_config = { token: authValue };
+        data.auth_token = authValue;
     }
 
     try {

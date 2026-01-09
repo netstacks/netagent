@@ -1,52 +1,51 @@
-"""Trigger routes for webhooks and scheduled runs."""
+"""Trigger routes for agent webhooks."""
 
 import hmac
 import hashlib
-from datetime import datetime
+import json
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from netagent_core.db import get_db, Workflow, WorkflowRun
-from netagent_core.auth import get_current_user, ALBUser
+from netagent_core.db import get_db, Agent, AgentSession
 from netagent_core.utils import audit_log, AuditEventType
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/webhook/{workflow_id}")
-async def webhook_trigger(
-    workflow_id: int,
+@router.post("/webhook/agent/{agent_id}")
+async def webhook_trigger_agent(
+    agent_id: int,
     request: Request,
     db: Session = Depends(get_db),
     x_webhook_signature: Optional[str] = Header(None),
 ):
-    """Webhook endpoint to trigger a workflow.
+    """Webhook endpoint to trigger an agent session.
 
-    Validates signature using workflow's webhook_secret.
+    The webhook payload becomes the initial context for the agent.
+    Optionally validates signature using agent's webhook_secret.
     """
-    workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
-    if not workflow:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
 
-    if not workflow.enabled:
-        raise HTTPException(status_code=400, detail="Workflow is disabled")
-
-    if workflow.trigger_type not in ["webhook", "manual"]:
-        raise HTTPException(status_code=400, detail="Workflow does not accept webhook triggers")
+    if not agent.enabled:
+        raise HTTPException(status_code=400, detail="Agent is disabled")
 
     # Get request body
     body = await request.body()
 
-    # Validate signature if webhook_secret is set
-    if workflow.webhook_secret:
+    # Validate signature if webhook_secret is set on agent
+    webhook_secret = getattr(agent, 'webhook_secret', None)
+    if webhook_secret:
         if not x_webhook_signature:
             raise HTTPException(status_code=401, detail="Missing webhook signature")
 
         expected_signature = hmac.new(
-            workflow.webhook_secret.encode(),
+            webhook_secret.encode(),
             body,
             hashlib.sha256
         ).hexdigest()
@@ -60,115 +59,58 @@ async def webhook_trigger(
             raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     # Parse trigger data
-    import json
     try:
         trigger_data = json.loads(body) if body else {}
     except json.JSONDecodeError:
         trigger_data = {"raw_body": body.decode("utf-8", errors="replace")}
 
-    # Create workflow run
-    run = WorkflowRun(
-        workflow_id=workflow_id,
+    # Extract message from trigger data, or use the whole payload as context
+    initial_message = trigger_data.get("message", trigger_data.get("prompt", None))
+    if not initial_message:
+        # If no message field, summarize the payload
+        initial_message = f"Webhook triggered with payload: {json.dumps(trigger_data)}"
+
+    # Create agent session
+    session = AgentSession(
+        agent_id=agent_id,
         status="pending",
         trigger_type="webhook",
-        trigger_data=trigger_data,
-        context={},
+        context=trigger_data,
     )
 
-    db.add(run)
+    db.add(session)
     db.commit()
-    db.refresh(run)
+    db.refresh(session)
 
-    # TODO: Queue workflow execution
-    # from services.tasks import execute_workflow
-    # execute_workflow.delay(run.id)
+    # Queue async agent execution via Celery
+    try:
+        from celery import current_app
+        current_app.send_task(
+            'tasks.agent_executor.execute_agent_session',
+            args=[session.id, initial_message],
+        )
+        logger.info(f"Queued agent execution for session {session.id}")
+    except Exception as e:
+        logger.warning(f"Failed to queue agent execution (Celery may not be available): {e}")
+        # Continue anyway - client can trigger via SSE endpoint
 
     audit_log(
         db,
-        AuditEventType.WORKFLOW_RUN_STARTED,
-        resource_type="workflow_run",
-        resource_id=run.id,
-        resource_name=workflow.name,
+        AuditEventType.AGENT_CHAT_STARTED,
+        resource_type="agent_session",
+        resource_id=session.id,
+        resource_name=agent.name,
         action="webhook_trigger",
-        details={"source_ip": request.client.host if request.client else None},
+        details={
+            "source_ip": request.client.host if request.client else None,
+            "trigger_data_keys": list(trigger_data.keys()) if isinstance(trigger_data, dict) else None,
+        },
     )
 
     return {
-        "run_id": run.id,
+        "session_id": session.id,
+        "agent_id": agent_id,
+        "agent_name": agent.name,
         "status": "pending",
-        "message": "Workflow triggered",
-    }
-
-
-@router.get("/schedules")
-async def list_schedules(
-    db: Session = Depends(get_db),
-    user: ALBUser = Depends(get_current_user),
-):
-    """List all scheduled workflow runs."""
-    workflows = db.query(Workflow).filter(
-        Workflow.trigger_type == "scheduled",
-        Workflow.enabled == True,
-        Workflow.schedule_cron.isnot(None),
-    ).all()
-
-    schedules = []
-    for w in workflows:
-        # TODO: Calculate next run time from cron expression
-        schedules.append({
-            "workflow_id": w.id,
-            "workflow_name": w.name,
-            "cron": w.schedule_cron,
-            "enabled": w.enabled,
-            "next_run": None,  # TODO: Calculate from cron
-        })
-
-    return {"schedules": schedules}
-
-
-@router.post("/schedules/{workflow_id}/run")
-async def trigger_scheduled_run(
-    workflow_id: int,
-    db: Session = Depends(get_db),
-    user: ALBUser = Depends(get_current_user),
-):
-    """Manually trigger a scheduled workflow run."""
-    workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
-    if not workflow:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-
-    if not workflow.enabled:
-        raise HTTPException(status_code=400, detail="Workflow is disabled")
-
-    run = WorkflowRun(
-        workflow_id=workflow_id,
-        status="pending",
-        trigger_type="manual",
-        trigger_data={},
-        context={},
-        initiated_by=user.id,
-    )
-
-    db.add(run)
-    db.commit()
-    db.refresh(run)
-
-    # TODO: Queue workflow execution
-    # from services.tasks import execute_workflow
-    # execute_workflow.delay(run.id)
-
-    audit_log(
-        db,
-        AuditEventType.WORKFLOW_RUN_STARTED,
-        user=user,
-        resource_type="workflow_run",
-        resource_id=run.id,
-        resource_name=workflow.name,
-        action="manual_trigger",
-    )
-
-    return {
-        "run_id": run.id,
-        "status": "pending",
-        "message": "Workflow triggered",
+        "message": "Agent session created",
     }

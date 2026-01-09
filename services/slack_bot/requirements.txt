@@ -1,3 +1,6 @@
 slack-bolt==1.18.1
 slack-sdk==3.26.2
 httpx==0.26.0
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+pgvector==0.2.4

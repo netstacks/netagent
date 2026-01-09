@@ -15,7 +15,6 @@ from netagent_core.db import init_db
 from routes import (
     agents,
     chat,
-    workflows,
     knowledge,
     devices,
     mcp,
@@ -24,6 +23,10 @@ from routes import (
     triggers,
     users,
     stats,
+    settings,
+    scheduled_tasks,
+    jobs,
+    memory,
 )
 
 logging.basicConfig(
@@ -71,7 +74,6 @@ app.add_middleware(
 # Include routers
 app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
-app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
 app.include_router(knowledge.router, prefix="/api/knowledge", tags=["Knowledge"])
 app.include_router(devices.router, prefix="/api/devices", tags=["Devices"])
 app.include_router(mcp.router, prefix="/api/mcp", tags=["MCP"])
@@ -80,6 +82,10 @@ app.include_router(audit.router, prefix="/api/audit", tags=["Audit"])
 app.include_router(triggers.router, prefix="/api/triggers", tags=["Triggers"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(stats.router, prefix="/api/stats", tags=["Stats"])
+app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
+app.include_router(scheduled_tasks.router, prefix="/api/scheduled-tasks", tags=["Scheduled Tasks"])
+app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
+app.include_router(memory.router, prefix="/api/memory", tags=["Memory"])
 
 
 @app.get("/api/health")

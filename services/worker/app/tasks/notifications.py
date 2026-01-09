@@ -212,25 +212,97 @@ def create_jira_ticket(
         labels: Optional list of labels
         custom_fields: Optional custom field values
     """
+    import asyncio
+    from netagent_core.db import get_db_context, MCPServer
+    from netagent_core.mcp import MCPClient
+    from netagent_core.utils import decrypt_value
+
     logger.info(f"Creating Jira ticket in {project_key}: {summary}")
 
-    # This would use the MCP-Atlassian integration
-    # For now, return placeholder
+    # Find Atlassian MCP server
+    with get_db_context() as db:
+        mcp_server = db.query(MCPServer).filter(
+            MCPServer.name.ilike("%atlassian%"),
+            MCPServer.enabled == True,
+        ).first()
 
-    # TODO: Call MCP-Atlassian server to create ticket
-    # from netagent_core.mcp import MCPClient
-    # mcp_server = get_mcp_server_by_name("atlassian")
-    # client = MCPClient(mcp_server.base_url)
-    # result = await client.call_tool("jira_create_issue", {
-    #     "project_key": project_key,
-    #     "summary": summary,
-    #     "description": description,
-    #     "issue_type": issue_type,
-    # })
+        if not mcp_server:
+            # Try searching by type
+            mcp_server = db.query(MCPServer).filter(
+                MCPServer.name.ilike("%jira%"),
+                MCPServer.enabled == True,
+            ).first()
 
-    return {
-        "success": True,
-        "message": "Jira ticket creation placeholder",
-        "project_key": project_key,
-        "summary": summary,
-    }
+        if not mcp_server:
+            logger.warning("No Atlassian/Jira MCP server configured")
+            return {
+                "success": False,
+                "error": "No Atlassian MCP server configured",
+                "project_key": project_key,
+                "summary": summary,
+            }
+
+        # Get auth token
+        auth_token = None
+        encryption_key = os.getenv("ENCRYPTION_KEY")
+        if mcp_server.auth_config_encrypted and encryption_key:
+            try:
+                auth_token = decrypt_value(mcp_server.auth_config_encrypted, encryption_key)
+            except Exception as e:
+                logger.error(f"Failed to decrypt MCP server auth: {e}")
+
+        server_url = mcp_server.base_url
+        auth_type = mcp_server.auth_type
+
+    # Create MCP client and call tool
+    async def _create_ticket():
+        client = MCPClient(
+            base_url=server_url,
+            auth_type=auth_type,
+            auth_token=auth_token,
+        )
+
+        try:
+            await client.initialize()
+
+            # Build the arguments for the Jira create issue tool
+            tool_args = {
+                "project_key": project_key,
+                "summary": summary,
+                "description": description,
+                "issue_type": issue_type,
+            }
+
+            if labels:
+                tool_args["labels"] = labels
+
+            if custom_fields:
+                tool_args["fields"] = custom_fields
+
+            # Call the MCP tool
+            # Tool name may vary based on MCP-Atlassian server implementation
+            result = await client.call_tool("jira_create_issue", tool_args)
+
+            return {
+                "success": True,
+                "result": result,
+                "project_key": project_key,
+                "summary": summary,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to create Jira ticket via MCP: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "project_key": project_key,
+                "summary": summary,
+            }
+
+    # Run async function in sync context
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_create_ticket())
+    finally:
+        loop.close()

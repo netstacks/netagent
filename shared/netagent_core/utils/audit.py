@@ -4,13 +4,16 @@ import json
 import logging
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, TYPE_CHECKING
 
 from sqlalchemy.orm import Session
-from fastapi import Request
 
 from ..db.models import AuditLog
 from ..auth.alb_auth import ALBUser
+
+# Import Request only for type checking to avoid requiring fastapi in worker
+if TYPE_CHECKING:
+    from fastapi import Request
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +68,13 @@ class AuditEventType(str, Enum):
     # System events
     SETTINGS_UPDATED = "system.settings.updated"
 
+    # Job events
+    JOB_CREATED = "job.created"
+    JOB_STARTED = "job.started"
+    JOB_COMPLETED = "job.completed"
+    JOB_FAILED = "job.failed"
+    JOB_CANCELLED = "job.cancelled"
+
 
 def audit_log(
     db: Session,
@@ -75,7 +85,7 @@ def audit_log(
     resource_name: Optional[str] = None,
     action: Optional[str] = None,
     details: Optional[Dict[str, Any]] = None,
-    request: Optional[Request] = None,
+    request: Optional["Request"] = None,
 ) -> AuditLog:
     """Log an audit event.
 

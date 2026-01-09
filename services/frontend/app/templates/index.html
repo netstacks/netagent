@@ -7,40 +7,48 @@
 <!-- Stats Cards -->
 <div class="row g-4 mb-4">
     <div class="col-md-6 col-lg-3">
-        <div class="stat-card">
-            <div class="stat-icon blue">
-                <i class="fas fa-robot"></i>
+        <a href="/agents" class="text-decoration-none">
+            <div class="stat-card clickable-stat">
+                <div class="stat-icon blue">
+                    <i class="fas fa-robot"></i>
+                </div>
+                <div class="stat-value" id="stat-agents">-</div>
+                <div class="stat-label">Active Agents</div>
             </div>
-            <div class="stat-value" id="stat-agents">-</div>
-            <div class="stat-label">Active Agents</div>
-        </div>
+        </a>
     </div>
     <div class="col-md-6 col-lg-3">
-        <div class="stat-card">
-            <div class="stat-icon green">
-                <i class="fas fa-sitemap"></i>
+        <a href="/knowledge" class="text-decoration-none">
+            <div class="stat-card clickable-stat">
+                <div class="stat-icon green">
+                    <i class="fas fa-book"></i>
+                </div>
+                <div class="stat-value" id="stat-knowledge">-</div>
+                <div class="stat-label">Knowledge Bases</div>
             </div>
-            <div class="stat-value" id="stat-workflows">-</div>
-            <div class="stat-label">Workflows</div>
-        </div>
+        </a>
     </div>
     <div class="col-md-6 col-lg-3">
-        <div class="stat-card">
-            <div class="stat-icon yellow">
-                <i class="fas fa-clipboard-check"></i>
+        <a href="/approvals" class="text-decoration-none">
+            <div class="stat-card clickable-stat">
+                <div class="stat-icon yellow">
+                    <i class="fas fa-clipboard-check"></i>
+                </div>
+                <div class="stat-value" id="stat-approvals">-</div>
+                <div class="stat-label">Pending Approvals</div>
             </div>
-            <div class="stat-value" id="stat-approvals">-</div>
-            <div class="stat-label">Pending Approvals</div>
-        </div>
+        </a>
     </div>
     <div class="col-md-6 col-lg-3">
-        <div class="stat-card">
-            <div class="stat-icon purple">
-                <i class="fas fa-comments"></i>
+        <a href="/sessions?status=active" class="text-decoration-none">
+            <div class="stat-card clickable-stat">
+                <div class="stat-icon purple">
+                    <i class="fas fa-play-circle"></i>
+                </div>
+                <div class="stat-value" id="stat-active-sessions">-</div>
+                <div class="stat-label">Active Sessions</div>
             </div>
-            <div class="stat-value" id="stat-sessions">-</div>
-            <div class="stat-label">Sessions Today</div>
-        </div>
+        </a>
     </div>
 </div>
 
@@ -76,28 +84,29 @@
         </div>
     </div>
 
-    <!-- Recent Workflow Runs -->
+    <!-- Recent Sessions -->
     <div class="col-lg-8">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="card-title mb-0">Recent Activity</h5>
-                <a href="/audit" class="btn btn-sm btn-outline-secondary">View All</a>
+                <h5 class="card-title mb-0">Recent Sessions</h5>
+                <a href="/sessions" class="btn btn-sm btn-outline-secondary">View All</a>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <table class="table table-hover mb-0">
                         <thead>
                             <tr>
-                                <th>Type</th>
-                                <th>Name</th>
+                                <th>Agent</th>
                                 <th>Status</th>
+                                <th>Messages</th>
                                 <th>User</th>
                                 <th>Time</th>
+                                <th></th>
                             </tr>
                         </thead>
-                        <tbody id="recent-activity">
+                        <tbody id="recent-sessions">
                             <tr>
-                                <td colspan="5" class="text-center text-muted py-4">
+                                <td colspan="6" class="text-center text-muted py-4">
                                     <i class="fas fa-spinner fa-spin"></i> Loading...
                                 </td>
                             </tr>
@@ -135,11 +144,19 @@ document.addEventListener('DOMContentLoaded', async function() {
     try {
         const stats = await apiClient.get('/api/stats/dashboard');
         document.getElementById('stat-agents').textContent = stats.agents || 0;
-        document.getElementById('stat-workflows').textContent = stats.workflows || 0;
         document.getElementById('stat-approvals').textContent = stats.pending_approvals || 0;
-        document.getElementById('stat-sessions').textContent = stats.sessions_today || 0;
+        document.getElementById('stat-knowledge').textContent = stats.knowledge_bases || 0;
     } catch (err) {
         console.error('Failed to load stats:', err);
+    }
+
+    // Load active sessions count
+    try {
+        const activeSessions = await apiClient.get('/api/chat/sessions?status=active&limit=1');
+        document.getElementById('stat-active-sessions').textContent = activeSessions.total || 0;
+    } catch (err) {
+        console.error('Failed to load active sessions count:', err);
+        document.getElementById('stat-active-sessions').textContent = '0';
     }
 
     // Load quick-access agents
@@ -173,36 +190,53 @@ document.addEventListener('DOMContentLoaded', async function() {
         console.error('Failed to load agents:', err);
     }
 
-    // Load recent activity
+    // Load recent sessions
     try {
-        const activity = await apiClient.get('/api/audit?limit=10');
-        const tbody = document.getElementById('recent-activity');
+        const sessions = await apiClient.get('/api/chat/sessions?limit=10');
+        const tbody = document.getElementById('recent-sessions');
 
-        if (activity.items && activity.items.length > 0) {
-            tbody.innerHTML = activity.items.map(item => `
-                <tr>
+        if (sessions.items && sessions.items.length > 0) {
+            tbody.innerHTML = sessions.items.map(session => `
+                <tr class="session-row" style="cursor: pointer;" onclick="window.location.href='/agents/${session.agent_id}/chat?session=${session.id}'">
                     <td>
-                        <span class="badge bg-secondary">${item.event_category}</span>
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-robot me-2 text-primary"></i>
+                            <span>${session.agent_name || 'Unknown'}</span>
+                        </div>
                     </td>
-                    <td>${item.resource_name || '-'}</td>
                     <td>
-                        <span class="badge bg-${getStatusColor(item.action)}">${item.action}</span>
+                        <span class="badge bg-${getSessionStatusColor(session.status)}">${session.status}</span>
                     </td>
-                    <td>${item.user_email || 'System'}</td>
-                    <td>${formatTime(item.created_at)}</td>
+                    <td>
+                        <i class="fas fa-comment me-1"></i>${session.message_count}
+                    </td>
+                    <td>${session.user_email ? session.user_email.split('@')[0] : 'System'}</td>
+                    <td>${formatTime(session.created_at)}</td>
+                    <td>
+                        <a href="/agents/${session.agent_id}/chat?session=${session.id}" class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation();">
+                            <i class="fas fa-external-link-alt"></i>
+                        </a>
+                    </td>
                 </tr>
             `).join('');
         } else {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="5" class="text-center text-muted py-4">
-                        No recent activity
+                    <td colspan="6" class="text-center text-muted py-4">
+                        No sessions yet. <a href="/agents">Start a chat with an agent</a>
                     </td>
                 </tr>
             `;
         }
     } catch (err) {
-        console.error('Failed to load activity:', err);
+        console.error('Failed to load sessions:', err);
+        document.getElementById('recent-sessions').innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center text-muted py-4">
+                    Failed to load sessions
+                </td>
+            </tr>
+        `;
     }
 
     // Load agent templates
@@ -245,6 +279,15 @@ function getStatusColor(action) {
         'reject': 'danger'
     };
     return colors[action] || 'secondary';
+}
+
+function getSessionStatusColor(status) {
+    const colors = {
+        'active': 'success',
+        'completed': 'secondary',
+        'failed': 'danger'
+    };
+    return colors[status] || 'secondary';
 }
 
 function formatTime(timestamp) {

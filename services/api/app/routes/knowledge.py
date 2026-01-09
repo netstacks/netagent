@@ -179,18 +179,17 @@ async def sync_knowledge_base(
     kb_id: int,
     db: Session = Depends(get_db),
     user: ALBUser = Depends(get_current_user),
+    background: bool = False,
 ):
-    """Trigger sync for a knowledge base."""
+    """Trigger sync for a knowledge base.
+
+    Args:
+        kb_id: Knowledge base ID
+        background: If True, queue for background processing (not yet implemented)
+    """
     kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
     if not kb:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
-
-    kb.sync_status = "pending"
-    db.commit()
-
-    # TODO: Queue sync task
-    # from services.tasks import sync_knowledge_base
-    # sync_knowledge_base.delay(kb_id)
 
     audit_log(
         db,
@@ -202,7 +201,31 @@ async def sync_knowledge_base(
         action="sync",
     )
 
-    return {"message": "Sync started", "status": "pending"}
+    if background:
+        # Queue for background processing via Celery
+        kb.sync_status = "pending"
+        db.commit()
+
+        try:
+            from celery import current_app
+            current_app.send_task(
+                'tasks.knowledge_indexer.sync_knowledge_base',
+                args=[kb_id],
+            )
+        except Exception as e:
+            # Log error but continue - sync status is set to pending
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to queue knowledge sync (Celery may not be available): {e}")
+
+        return {"message": "Sync queued", "status": "pending"}
+
+    # Sync immediately
+    from netagent_core.knowledge import KnowledgeIndexer
+
+    indexer = KnowledgeIndexer(db)
+    stats = await indexer.sync_knowledge_base(kb_id)
+
+    return {"message": "Sync completed", "status": kb.sync_status, "stats": stats}
 
 
 @router.get("/{kb_id}/documents", response_model=dict)
@@ -237,6 +260,58 @@ async def list_documents(
     }
 
 
+class ManualDocumentCreate(BaseModel):
+    title: str
+    content: str
+    source_url: Optional[str] = None
+
+
+@router.post("/{kb_id}/documents")
+async def add_manual_document(
+    kb_id: int,
+    data: ManualDocumentCreate,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Add a manual document to a knowledge base."""
+    kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+    if not kb:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    if kb.source_type != "manual":
+        raise HTTPException(
+            status_code=400,
+            detail="Can only add documents to manual knowledge bases"
+        )
+
+    from netagent_core.knowledge import KnowledgeIndexer
+
+    indexer = KnowledgeIndexer(db)
+    doc = await indexer.add_manual_document(
+        kb_id=kb_id,
+        title=data.title,
+        content=data.content,
+        source_url=data.source_url,
+    )
+
+    audit_log(
+        db,
+        AuditEventType.KNOWLEDGE_UPDATED,
+        user=user,
+        resource_type="knowledge_document",
+        resource_id=doc.id,
+        resource_name=doc.title,
+        action="create",
+    )
+
+    return {
+        "id": doc.id,
+        "title": doc.title,
+        "source_url": doc.source_url,
+        "message": "Document added successfully",
+    }
+
+
 @router.post("/search")
 async def search_knowledge(
     data: SearchRequest,
@@ -244,11 +319,16 @@ async def search_knowledge(
     user: ALBUser = Depends(get_current_user),
 ):
     """Search across knowledge bases using vector similarity."""
-    # TODO: Implement vector search with pgvector
-    # This requires embedding the query and searching knowledge_chunks
+    from netagent_core.knowledge import KnowledgeIndexer
+
+    indexer = KnowledgeIndexer(db)
+    results = await indexer.search(
+        query=data.query,
+        knowledge_base_ids=data.knowledge_base_ids,
+        top_k=data.top_k,
+    )
 
     return {
         "query": data.query,
-        "results": [],
-        "message": "Vector search not yet implemented",
+        "results": results,
     }

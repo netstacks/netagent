@@ -156,7 +156,7 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
 <script>
 let credentials = [];
 let editingId = null;
@@ -183,7 +183,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function loadCredentials() {
     try {
-        credentials = await api.get('/api/devices/credentials');
+        const response = await api.get('/api/devices/credentials');
+        credentials = response.items || [];
         renderCredentials();
     } catch (error) {
         showToast('Failed to load credentials', 'error');

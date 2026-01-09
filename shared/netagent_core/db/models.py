@@ -63,6 +63,14 @@ class Agent(Base):
     allowed_device_patterns = Column(JSONB, default=lambda: ["*"])
     mcp_server_ids = Column(JSONB, default=list)
     knowledge_base_ids = Column(JSONB, default=list)
+    # If set, restricts which agents this agent can hand off to (None = all enabled agents)
+    allowed_handoff_agent_ids = Column(JSONB)
+
+    # Scheduling - run agent on a schedule with a configured prompt
+    schedule_cron = Column(String(100))  # Cron expression (e.g., "0 8 * * *" for daily at 8am)
+    schedule_prompt = Column(Text)  # The prompt to use when triggered by schedule
+    schedule_enabled = Column(Boolean, default=False)
+    last_scheduled_run = Column(DateTime)  # Track last run to prevent duplicates
 
     # Metadata
     is_template = Column(Boolean, default=False)
@@ -70,6 +78,10 @@ class Agent(Base):
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Ephemeral agent tracking (for auto-generated agents in jobs)
+    is_ephemeral = Column(Boolean, default=False)
+    created_for_job_id = Column(Integer, ForeignKey("jobs.id"))
 
     # Relationships
     creator = relationship("User", back_populates="agents")
@@ -184,8 +196,12 @@ class AgentSession(Base):
     agent_id = Column(Integer, ForeignKey("agents.id"), index=True)
     workflow_run_id = Column(Integer, ForeignKey("workflow_runs.id"), index=True)
 
+    # Handoff tracking - links child sessions to parent
+    parent_session_id = Column(Integer, ForeignKey("agent_sessions.id"), index=True)
+    handoff_context = Column(JSONB)  # Context passed during handoff
+
     status = Column(String(20), default="active", index=True)
-    trigger_type = Column(String(20))
+    trigger_type = Column(String(20))  # user, webhook, handoff
 
     # Stats
     message_count = Column(Integer, default=0)
@@ -203,8 +219,10 @@ class AgentSession(Base):
     workflow_run = relationship("WorkflowRun", back_populates="sessions")
     user = relationship("User", back_populates="sessions")
     messages = relationship("AgentMessage", back_populates="session", cascade="all, delete-orphan")
-    actions = relationship("AgentAction", back_populates="session", cascade="all, delete-orphan")
+    actions = relationship("AgentAction", back_populates="session", cascade="all, delete-orphan", foreign_keys="[AgentAction.session_id]")
     approvals = relationship("Approval", back_populates="session")
+    # Self-referential relationship for handoffs
+    parent_session = relationship("AgentSession", remote_side=[id], backref="child_sessions")
 
 
 class AgentMessage(Base):
@@ -242,6 +260,9 @@ class AgentAction(Base):
     tool_input = Column(JSONB)
     tool_output = Column(JSONB)
 
+    # For handoff tool calls - links to the child session
+    child_session_id = Column(Integer, ForeignKey("agent_sessions.id"))
+
     # For thoughts/reasoning
     reasoning = Column(Text)
 
@@ -257,7 +278,8 @@ class AgentAction(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
-    session = relationship("AgentSession", back_populates="actions")
+    session = relationship("AgentSession", back_populates="actions", foreign_keys=[session_id])
+    child_session = relationship("AgentSession", foreign_keys=[child_session_id])
 
 
 class KnowledgeBase(Base):
@@ -321,7 +343,7 @@ class KnowledgeChunk(Base):
     # pgvector embedding (768 dimensions for Gemini embeddings)
     embedding = Column(Vector(768))
 
-    metadata = Column(JSONB)
+    chunk_metadata = Column(JSONB)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -397,6 +419,7 @@ class Approval(Base):
     agent_action_id = Column(Integer, ForeignKey("agent_actions.id"))
     session_id = Column(Integer, ForeignKey("agent_sessions.id"), index=True)
     workflow_run_id = Column(Integer, ForeignKey("workflow_runs.id"), index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), index=True)  # For job approvals
 
     # What needs approval
     action_type = Column(String(50), nullable=False)
@@ -422,6 +445,7 @@ class Approval(Base):
     # Relationships
     session = relationship("AgentSession", back_populates="approvals")
     workflow_run = relationship("WorkflowRun", back_populates="approvals")
+    job = relationship("Job", back_populates="approvals")
 
 
 class AuditLog(Base):
@@ -466,3 +490,242 @@ class Settings(Base):
     key = Column(String(100), primary_key=True)
     value = Column(JSONB)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ScheduledTask(Base):
+    """Scheduled tasks that run agents on a cron schedule."""
+
+    __tablename__ = "scheduled_tasks"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+
+    # Which agent to run
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False, index=True)
+
+    # Schedule configuration
+    schedule_cron = Column(String(100), nullable=False)  # Cron expression
+    prompt = Column(Text, nullable=False)  # The prompt to send to the agent
+
+    # Status
+    enabled = Column(Boolean, default=True, index=True)
+    last_run_at = Column(DateTime)
+    last_run_status = Column(String(20))  # success, failed, running
+    last_session_id = Column(Integer, ForeignKey("agent_sessions.id"))
+
+    # Metadata
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    agent = relationship("Agent")
+    last_session = relationship("AgentSession", foreign_keys=[last_session_id])
+
+
+# =============================================================================
+# JOB ORCHESTRATION MODELS
+# =============================================================================
+
+
+class Job(Base):
+    """Orchestrated job containing multiple tasks.
+
+    A Job represents a complex, multi-step task submitted by a user.
+    Jobs can be submitted as structured markdown or natural language,
+    and are executed by spawning worker agent sessions.
+    """
+
+    __tablename__ = "jobs"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+
+    # Job specification
+    spec_raw = Column(Text, nullable=False)  # Original markdown/natural language
+    spec_parsed = Column(JSONB)  # Structured JSON after parsing
+
+    # Execution configuration
+    status = Column(String(30), default="pending", index=True)
+    # Status values: pending, awaiting_confirmation, queued, executing,
+    #                validating, awaiting_approval, delivering, completed, failed, cancelled
+    execution_mode = Column(String(20), default="batch")  # parallel, sequential, batch
+    batch_size = Column(Integer, default=5)
+    on_failure = Column(String(20), default="continue")  # stop, continue, retry
+    retry_count = Column(Integer, default=3)  # For retry mode
+    validation_mode = Column(String(20), default="ai")  # ai, human, ai+human
+
+    # Delivery configuration
+    delivery_config = Column(JSONB)  # {email: [], slack: [], s3: [], webhook: []}
+
+    # Execution tracking
+    orchestrator_session_id = Column(Integer, ForeignKey("agent_sessions.id"))
+    results = Column(JSONB)  # Aggregated results from all tasks
+    error_summary = Column(Text)
+
+    # Progress tracking
+    total_tasks = Column(Integer, default=0)
+    completed_tasks = Column(Integer, default=0)
+    failed_tasks = Column(Integer, default=0)
+
+    # Ownership
+    created_by = Column(Integer, ForeignKey("users.id"), index=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+
+    # Relationships
+    tasks = relationship("JobTask", back_populates="job", cascade="all, delete-orphan")
+    creator = relationship("User")
+    orchestrator_session = relationship("AgentSession", foreign_keys=[orchestrator_session_id])
+    approvals = relationship("Approval", back_populates="job")
+
+    __table_args__ = (
+        Index("idx_jobs_status_created", "status", "created_at"),
+    )
+
+
+class JobTask(Base):
+    """Individual task within a job.
+
+    Each JobTask represents a single step in a job workflow.
+    Tasks are executed by agents (either pre-existing or ephemeral).
+    """
+
+    __tablename__ = "job_tasks"
+
+    id = Column(Integer, primary_key=True)
+    job_id = Column(Integer, ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Task definition
+    sequence = Column(Integer, nullable=False)  # Execution order: 1, 2, 3...
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    spec = Column(JSONB, nullable=False)  # Task details from parsed spec
+
+    # Agent assignment
+    agent_id = Column(Integer, ForeignKey("agents.id"))  # Pre-existing agent
+    agent_name_hint = Column(String(100))  # Hint for agent matching (e.g., "netbox-query")
+    is_ephemeral_agent = Column(Boolean, default=False)
+    ephemeral_agent_id = Column(Integer, ForeignKey("agents.id"))  # Auto-generated agent
+    ephemeral_prompt = Column(Text)  # Generated prompt for ephemeral agent
+
+    # Execution
+    session_id = Column(Integer, ForeignKey("agent_sessions.id"))
+    status = Column(String(30), default="pending", index=True)
+    # Status values: pending, running, completed, failed, skipped
+
+    # Dependencies - list of task sequences this task depends on
+    depends_on = Column(JSONB, nullable=True, default=list)  # [1, 2] means depends on task 1 and 2
+
+    # For batch tasks (e.g., "for each device")
+    is_batch = Column(Boolean, default=False)
+    batch_items = Column(JSONB)  # List of items to process
+    batch_results = Column(JSONB)  # Results per item
+    batch_source_task = Column(Integer, nullable=True)  # Sequence of task to get batch items from
+
+    # Results
+    result = Column(JSONB)
+    error = Column(Text)
+
+    # Timestamps
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+
+    # Relationships
+    job = relationship("Job", back_populates="tasks")
+    agent = relationship("Agent", foreign_keys=[agent_id])
+    ephemeral_agent = relationship("Agent", foreign_keys=[ephemeral_agent_id])
+    session = relationship("AgentSession")
+
+
+# ==================== Memory Models ====================
+
+class Memory(Base):
+    """Persistent memory entries for agents.
+
+    Memories are facts, preferences, or learnings that persist across sessions.
+    They can be scoped to a user, agent, or be global.
+    """
+
+    __tablename__ = "memories"
+
+    id = Column(Integer, primary_key=True)
+
+    # Memory content
+    content = Column(Text, nullable=False)
+    memory_type = Column(String(30), nullable=False, index=True)  # preference, fact, summary, instruction
+
+    # Scoping - at least one should be set, or none for global
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), index=True)
+
+    # Source tracking
+    source_session_id = Column(Integer, ForeignKey("agent_sessions.id"))
+    source_job_id = Column(Integer, ForeignKey("jobs.id"))
+
+    # Metadata
+    category = Column(String(50), index=True)
+    tags = Column(JSONB, default=list)
+    confidence = Column(Float, default=1.0)
+
+    # Vector embedding for semantic search (stored as JSONB for compatibility)
+    embedding = Column(JSONB)
+
+    # Lifecycle
+    is_active = Column(Boolean, default=True, index=True)
+    expires_at = Column(DateTime)
+    access_count = Column(Integer, default=0)
+    last_accessed_at = Column(DateTime)
+
+    # Audit
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+    agent = relationship("Agent", foreign_keys=[agent_id])
+    source_session = relationship("AgentSession", foreign_keys=[source_session_id])
+    source_job = relationship("Job", foreign_keys=[source_job_id])
+    creator = relationship("User", foreign_keys=[created_by])
+
+    __table_args__ = (
+        Index("idx_memories_scope", "user_id", "agent_id", "is_active"),
+        Index("idx_memories_category_active", "category", "is_active"),
+    )
+
+
+class SessionSummary(Base):
+    """Condensed summary of a completed session."""
+
+    __tablename__ = "session_summaries"
+
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+                        unique=True, nullable=False)
+
+    # Summary content
+    summary = Column(Text, nullable=False)
+    key_actions = Column(JSONB, default=list)
+    key_findings = Column(JSONB, default=list)
+    tools_used = Column(JSONB, default=list)
+
+    # Extracted memories
+    extracted_memory_ids = Column(JSONB, default=list)
+
+    # Metadata
+    message_count = Column(Integer)
+    tool_call_count = Column(Integer)
+    duration_seconds = Column(Integer)
+
+    # Vector embedding
+    embedding = Column(JSONB)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    session = relationship("AgentSession", backref="summary")

@@ -1,6 +1,7 @@
 """Slack bot handlers for interactive messages."""
 
 import os
+import re
 import logging
 import httpx
 
@@ -12,7 +13,7 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://api:8001")
 def register_handlers(app):
     """Register all Slack handlers."""
 
-    @app.action(pattern="^approve_\\d+$")
+    @app.action(re.compile(r"^approve_\d+$"))
     def handle_approve(ack, body, client, logger):
         """Handle approval button click."""
         ack()
@@ -67,7 +68,7 @@ def register_handlers(app):
                 text=f"Error processing approval: {str(e)}",
             )
 
-    @app.action(pattern="^reject_\\d+$")
+    @app.action(re.compile(r"^reject_\d+$"))
     def handle_reject(ack, body, client, logger):
         """Handle rejection button click."""
         ack()

@@ -301,6 +301,161 @@ async def settings(
     )
 
 
+@app.get("/jobs", response_class=HTMLResponse)
+async def jobs_list(
+    request: Request,
+    user: ALBUser = Depends(get_current_user_optional),
+):
+    """Jobs list page."""
+    return templates.TemplateResponse(
+        "jobs.html",
+        {
+            "request": request,
+            "user": user,
+            "active_page": "jobs",
+            "pending_approvals": 0,
+        }
+    )
+
+
+@app.get("/jobs/new", response_class=HTMLResponse)
+async def job_create(
+    request: Request,
+    user: ALBUser = Depends(get_current_user_optional),
+):
+    """Create job page."""
+    return templates.TemplateResponse(
+        "job_create.html",
+        {
+            "request": request,
+            "user": user,
+            "active_page": "jobs",
+            "pending_approvals": 0,
+            "job_id": None,  # Create mode
+        }
+    )
+
+
+@app.get("/jobs/{job_id}/edit", response_class=HTMLResponse)
+async def job_edit(
+    request: Request,
+    job_id: int,
+    user: ALBUser = Depends(get_current_user_optional),
+):
+    """Edit job page - works for any job status.
+
+    For pending jobs: edits in place
+    For completed/failed/cancelled jobs: creates a new job as copy
+    """
+    # Fetch job data from API
+    job_data = await fetch_from_api(f"/api/jobs/{job_id}", request)
+    if not job_data:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Pass the job status so the UI knows whether to edit or clone
+    return templates.TemplateResponse(
+        "job_create.html",
+        {
+            "request": request,
+            "user": user,
+            "active_page": "jobs",
+            "pending_approvals": 0,
+            "job_id": job_id,  # Pass job_id for edit mode
+            "job_status": job_data.get("status"),  # Let UI know the status
+        }
+    )
+
+
+@app.get("/jobs/{job_id}", response_class=HTMLResponse)
+async def job_detail(
+    request: Request,
+    job_id: int,
+    user: ALBUser = Depends(get_current_user_optional),
+):
+    """Job detail page."""
+    # Fetch job data from API
+    job_data = await fetch_from_api(f"/api/jobs/{job_id}", request)
+    if not job_data:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Determine status color
+    status_colors = {
+        "pending": "secondary",
+        "awaiting_confirmation": "info",
+        "queued": "info",
+        "executing": "primary",
+        "validating": "warning",
+        "awaiting_approval": "warning",
+        "delivering": "info",
+        "completed": "success",
+        "failed": "danger",
+        "cancelled": "dark",
+    }
+    status_color = status_colors.get(job_data.get("status", ""), "secondary")
+
+    # Create a simple job object for the template
+    class JobObj:
+        def __init__(self, data):
+            for key, value in data.items():
+                if key == "created_at" and value:
+                    from datetime import datetime
+                    try:
+                        setattr(self, key, datetime.fromisoformat(value.replace("Z", "+00:00")))
+                    except:
+                        setattr(self, key, None)
+                else:
+                    setattr(self, key, value)
+
+    job = JobObj(job_data)
+
+    return templates.TemplateResponse(
+        "job_detail.html",
+        {
+            "request": request,
+            "user": user,
+            "active_page": "jobs",
+            "pending_approvals": 0,
+            "job": job,
+            "status_color": status_color,
+            "task_status_color": lambda s: status_colors.get(s, "secondary"),
+            "task_duration": _calculate_task_duration,
+        }
+    )
+
+
+def _calculate_task_duration(task):
+    """Calculate task duration as a human-readable string."""
+    if not hasattr(task, "started_at") or not task.started_at:
+        return "-"
+
+    from datetime import datetime
+
+    try:
+        if isinstance(task.started_at, str):
+            start = datetime.fromisoformat(task.started_at.replace("Z", "+00:00"))
+        else:
+            start = task.started_at
+
+        if hasattr(task, "completed_at") and task.completed_at:
+            if isinstance(task.completed_at, str):
+                end = datetime.fromisoformat(task.completed_at.replace("Z", "+00:00"))
+            else:
+                end = task.completed_at
+        else:
+            end = datetime.utcnow()
+
+        seconds = int((end - start).total_seconds())
+
+        if seconds < 60:
+            return f"{seconds}s"
+        elif seconds < 3600:
+            return f"{seconds // 60}m {seconds % 60}s"
+        else:
+            return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
+    except:
+        return "-"
+
+
 @app.get("/scheduled-tasks", response_class=HTMLResponse)
 async def scheduled_tasks_list(
     request: Request,

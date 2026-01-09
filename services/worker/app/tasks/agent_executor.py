@@ -90,14 +90,12 @@ def wait_for_approval(session_id: int, approval_id: int, poll_interval: int = 5,
 
 
 def build_tools_for_agent(agent: Agent, db_session_factory, session_id: int):
-    """Build tools for agent execution.
-
-    This is a simplified version that doesn't include MCP tools
-    (since they require async operation).
+    """Build non-async tools for agent execution.
 
     Note:
         Empty knowledge_base_ids means "use no knowledge bases".
         Resources must be explicitly configured per agent.
+        MCP tools are loaded separately via build_mcp_tools_for_agent (async).
     """
     from netagent_core.tools import create_ssh_tool, create_knowledge_search_tool, create_email_tool
     import os
@@ -126,6 +124,37 @@ def build_tools_for_agent(agent: Agent, db_session_factory, session_id: int):
         tools.append(create_email_tool())
 
     return tools
+
+
+async def build_mcp_tools_for_agent(agent: Agent, db_session_factory):
+    """Build MCP tools for agent execution (async).
+
+    Args:
+        agent: Agent model with mcp_server_ids
+        db_session_factory: Factory for database sessions
+
+    Returns:
+        List of ToolDefinitions for MCP tools
+    """
+    import os
+    from netagent_core.tools.mcp_tool import load_mcp_tools_for_agent
+
+    if not agent.mcp_server_ids:
+        return []
+
+    encryption_key = os.getenv("ENCRYPTION_KEY")
+
+    try:
+        mcp_tools = await load_mcp_tools_for_agent(
+            mcp_server_ids=agent.mcp_server_ids,
+            db_session_factory=db_session_factory,
+            encryption_key=encryption_key,
+        )
+        logger.info(f"Loaded {len(mcp_tools)} MCP tools for agent {agent.id}")
+        return mcp_tools
+    except Exception as e:
+        logger.error(f"Failed to load MCP tools for agent {agent.id}: {e}")
+        return []
 
 
 async def _run_agent_session(session_id: int, initial_message: str = None):
@@ -165,8 +194,14 @@ async def _run_agent_session(session_id: int, initial_message: str = None):
         db.commit()
 
         try:
-            # Build tools
+            # Build tools (sync tools first)
             tools = build_tools_for_agent(agent, get_db_context, session_id)
+
+            # Load MCP tools (async)
+            mcp_tools = await build_mcp_tools_for_agent(agent, get_db_context)
+            tools.extend(mcp_tools)
+
+            logger.info(f"Agent {agent.id} has {len(tools)} total tools available")
 
             # Create Gemini client
             client = GeminiClient(model=agent.model)

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Chat with {{ agent.name }} - NetAgent{% endblock %}
+{% block title %}Agent Chat - NetAgent{% endblock %}
 
 {% block content %}
 <div class="chat-container">
@@ -14,8 +14,8 @@
                 <i class="bi bi-robot"></i>
             </div>
             <div>
-                <h5 class="mb-0">{{ agent.name }}</h5>
-                <small class="text-muted">{{ agent.agent_type }} agent</small>
+                <h5 class="mb-0" id="agent-name">Loading...</h5>
+                <small class="text-muted" id="agent-type">agent</small>
             </div>
         </div>
         <div class="d-flex align-items-center">
@@ -29,7 +29,7 @@
                     <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#sessionsModal"><i class="bi bi-clock-history me-2"></i>Session History</a></li>
                     <li><hr class="dropdown-divider"></li>
                     <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#actionsModal"><i class="bi bi-list-check me-2"></i>Action Log</a></li>
-                    <li><a class="dropdown-item" href="/agents/{{ agent.id }}/edit"><i class="bi bi-gear me-2"></i>Agent Settings</a></li>
+                    <li><a class="dropdown-item" href="/agents/{{ agent_id }}" id="settings-link"><i class="bi bi-gear me-2"></i>Agent Settings</a></li>
                 </ul>
             </div>
         </div>
@@ -41,19 +41,11 @@
             <div class="agent-avatar-lg mx-auto mb-4">
                 <i class="bi bi-robot"></i>
             </div>
-            <h4>{{ agent.name }}</h4>
-            <p class="text-muted">{{ agent.description or 'Start a conversation with this agent' }}</p>
-            <div class="d-flex justify-content-center gap-2 flex-wrap mt-4">
-                {% if agent.agent_type == 'triage' %}
-                <button class="btn btn-outline-secondary btn-sm suggestion-btn">I have a network issue to report</button>
-                <button class="btn btn-outline-secondary btn-sm suggestion-btn">BGP session is down on router-01</button>
-                {% elif agent.agent_type == 'bgp' %}
-                <button class="btn btn-outline-secondary btn-sm suggestion-btn">Show me BGP neighbors on router-01</button>
-                <button class="btn btn-outline-secondary btn-sm suggestion-btn">Why is BGP peer 10.1.1.1 down?</button>
-                {% else %}
+            <h4 id="welcome-agent-name">Loading...</h4>
+            <p class="text-muted" id="welcome-description">Start a conversation with this agent</p>
+            <div class="d-flex justify-content-center gap-2 flex-wrap mt-4" id="suggestions-container">
                 <button class="btn btn-outline-secondary btn-sm suggestion-btn">What can you help me with?</button>
                 <button class="btn btn-outline-secondary btn-sm suggestion-btn">Show me available commands</button>
-                {% endif %}
             </div>
         </div>
     </div>
@@ -73,9 +65,9 @@
             </button>
         </form>
         <div class="text-center mt-2">
-            <small class="text-muted">
+            <small class="text-muted" id="model-info">
                 <i class="bi bi-info-circle me-1"></i>
-                {{ agent.model }} &middot; Temperature: {{ agent.temperature }}
+                Loading...
             </small>
         </div>
     </div>
@@ -116,17 +108,21 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
-<script src="/static/js/chat.js"></script>
+{% block extra_js %}
+<script src="/static/js/chat.js?v=3"></script>
 <script>
-const agentId = {{ agent.id }};
-const agentName = "{{ agent.name }}";
+const agentId = {{ agent_id }};
+let agentName = "Agent";
+let agent = null;
 
 let sessionId = null;
 let eventSource = null;
 let isStreaming = false;
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+    // Load agent data first
+    await loadAgentData();
+
     // Auto-resize textarea
     const textarea = document.getElementById('message-input');
     textarea.addEventListener('input', function() {
@@ -138,7 +134,7 @@ document.addEventListener('DOMContentLoaded', function() {
     textarea.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            document.getElementById('chat-form').dispatchEvent(new Event('submit'));
+            sendMessage(new Event('keydown'));
         }
     });
 
@@ -155,7 +151,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.suggestion-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             document.getElementById('message-input').value = this.textContent;
-            document.getElementById('chat-form').dispatchEvent(new Event('submit'));
+            sendMessage(new Event('click'));
         });
     });
 
@@ -165,6 +161,58 @@ document.addEventListener('DOMContentLoaded', function() {
         loadSession(savedSessionId);
     }
 });
+
+async function loadAgentData() {
+    try {
+        agent = await api.get(`/api/agents/${agentId}`);
+        agentName = agent.name;
+
+        // Update UI with agent data
+        document.getElementById('agent-name').textContent = agent.name;
+        document.getElementById('agent-type').textContent = agent.agent_type + ' agent';
+        document.getElementById('welcome-agent-name').textContent = agent.name;
+        document.getElementById('welcome-description').textContent = agent.description || 'Start a conversation with this agent';
+        document.getElementById('model-info').innerHTML = `<i class="bi bi-info-circle me-1"></i>${agent.model} &middot; Temperature: ${agent.temperature}`;
+        document.title = `Chat with ${agent.name} - NetAgent`;
+
+        // Update suggestions based on agent type
+        updateSuggestions(agent.agent_type);
+    } catch (error) {
+        console.error('Failed to load agent:', error);
+        showToast('Failed to load agent data', 'error');
+    }
+}
+
+function updateSuggestions(agentType) {
+    const container = document.getElementById('suggestions-container');
+    let suggestions = [];
+
+    switch (agentType) {
+        case 'triage':
+            suggestions = ['I have a network issue to report', 'BGP session is down on router-01'];
+            break;
+        case 'bgp':
+            suggestions = ['Show me BGP neighbors on router-01', 'Why is BGP peer 10.1.1.1 down?'];
+            break;
+        case 'ospf':
+            suggestions = ['Show OSPF neighbors on core-01', 'Check OSPF route for 10.0.0.0/8'];
+            break;
+        default:
+            suggestions = ['What can you help me with?', 'Show me available commands'];
+    }
+
+    container.innerHTML = suggestions.map(s =>
+        `<button class="btn btn-outline-secondary btn-sm suggestion-btn">${escapeHtml(s)}</button>`
+    ).join('');
+
+    // Re-attach event listeners
+    container.querySelectorAll('.suggestion-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.getElementById('message-input').value = this.textContent;
+            sendMessage(new Event('click'));
+        });
+    });
+}
 
 async function sendMessage(e) {
     e.preventDefault();
@@ -211,11 +259,20 @@ function startStreaming(message) {
     // Start SSE connection
     const url = `/api/chat/sessions/${sessionId}/message`;
 
+    console.log('[Chat] Starting fetch to', url);
     fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+        },
+        credentials: 'include',
         body: JSON.stringify({ content: message })
     }).then(response => {
+        console.log('[Chat] Response received:', response.status, response.statusText);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -224,11 +281,14 @@ function startStreaming(message) {
         function processStream() {
             reader.read().then(({ done, value }) => {
                 if (done) {
+                    console.log('[Chat] Stream done');
                     finishStreaming();
                     return;
                 }
 
-                buffer += decoder.decode(value, { stream: true });
+                const chunk = decoder.decode(value, { stream: true });
+                console.log('[Chat] Received chunk:', chunk.substring(0, 100));
+                buffer += chunk;
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
 
@@ -236,29 +296,34 @@ function startStreaming(message) {
                     if (line.startsWith('data: ')) {
                         try {
                             const data = JSON.parse(line.slice(6));
+                            console.log('[Chat] Event:', data.type);
                             handleStreamEvent(data, contentDiv, thinkingDiv, currentContent);
                             if (data.type === 'content') {
                                 currentContent += data.content || '';
                             }
                         } catch (e) {
-                            console.error('Parse error:', e);
+                            console.error('[Chat] Parse error:', e, 'Line:', line);
                         }
                     }
                 }
 
                 processStream();
             }).catch(error => {
-                console.error('Stream error:', error);
+                console.error('[Chat] Stream error:', error);
                 finishStreaming();
             });
         }
 
         processStream();
     }).catch(error => {
-        showToast('Failed to send message', 'error');
+        console.error('[Chat] Fetch error:', error);
+        showToast('Failed to send message: ' + error.message, 'error');
         finishStreaming();
     });
 }
+
+// Track active handoff cards by session ID
+const activeHandoffs = {};
 
 function handleStreamEvent(data, contentDiv, thinkingDiv, currentContent) {
     switch (data.type) {
@@ -270,8 +335,17 @@ function handleStreamEvent(data, contentDiv, thinkingDiv, currentContent) {
             }
             break;
 
+        case 'reasoning':
+            updateStatus('reasoning');
+            if (thinkingDiv) {
+                thinkingDiv.style.display = 'block';
+                const reasoningContent = thinkingDiv.querySelector('.thinking-content');
+                reasoningContent.innerHTML += `<div class="reasoning-step"><i class="bi bi-lightbulb text-warning me-2"></i>${escapeHtml(data.content)}</div>`;
+            }
+            break;
+
         case 'tool_call':
-            updateStatus('using tool: ' + data.tool_name);
+            updateStatus('using tool: ' + data.name);
             appendToolCall(thinkingDiv, data);
             break;
 
@@ -285,14 +359,252 @@ function handleStreamEvent(data, contentDiv, thinkingDiv, currentContent) {
             scrollToBottom();
             break;
 
+        case 'approval_required':
+            updateStatus('awaiting approval');
+            appendApprovalRequest(thinkingDiv, data);
+            break;
+
+        case 'handoff_start':
+            updateStatus('delegating to ' + (data.target_agent?.name || data.target_agent_name || 'agent'));
+            appendHandoffCard(thinkingDiv, data);
+            break;
+
+        case 'handoff_event':
+            handleNestedHandoffEvent(data);
+            break;
+
+        case 'handoff_complete':
+            updateHandoffComplete(data);
+            break;
+
+        case 'handoff_error':
+            updateHandoffError(data);
+            break;
+
         case 'done':
             finishStreaming();
             break;
 
         case 'error':
             showToast(data.error || 'An error occurred', 'error');
+            if (contentDiv && !contentDiv.textContent.trim()) {
+                contentDiv.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-2"></i>${escapeHtml(data.error)}</span>`;
+            }
             finishStreaming();
             break;
+    }
+}
+
+function appendHandoffCard(thinkingDiv, data) {
+    if (!thinkingDiv) return;
+
+    const toolsContainer = thinkingDiv.querySelector('.tool-calls');
+    const depth = data.depth || 1;
+    const handoffDiv = document.createElement('div');
+    handoffDiv.className = `handoff-card depth-${depth}`;
+    handoffDiv.dataset.sessionId = data.child_session_id;
+
+    // Store reference for nested events
+    activeHandoffs[data.child_session_id] = handoffDiv;
+
+    const contextJson = data.context ? JSON.stringify(data.context, null, 2) : '{}';
+    const agentName = data.target_agent?.name || data.target_agent_name || 'Agent';
+
+    handoffDiv.innerHTML = `
+        <div class="handoff-header" onclick="toggleHandoff(this)">
+            <div class="handoff-header-left">
+                <i class="bi bi-arrow-right-circle handoff-icon"></i>
+                <span class="handoff-agent-name">${escapeHtml(agentName)}</span>
+                <span class="handoff-status running">
+                    <span class="spinner-border spinner-border-sm me-1"></span>Running
+                </span>
+            </div>
+            <div class="handoff-header-right">
+                <span class="handoff-duration"></span>
+                <i class="bi bi-chevron-right handoff-toggle"></i>
+            </div>
+        </div>
+        <div class="handoff-task">${escapeHtml(data.task_summary)}</div>
+        <div class="handoff-content">
+            <div class="handoff-context">
+                <div class="handoff-context-toggle" onclick="event.stopPropagation(); toggleContext(this)">
+                    <i class="bi bi-chevron-right"></i>
+                    <span>Context</span>
+                </div>
+                <div class="handoff-context-data">
+                    <pre><code>${escapeHtml(contextJson)}</code></pre>
+                </div>
+            </div>
+            <div class="handoff-events"></div>
+            <div class="handoff-result" style="display: none;">
+                <div class="handoff-result-label">Result:</div>
+                <div class="handoff-result-content"></div>
+            </div>
+        </div>
+    `;
+
+    toolsContainer.appendChild(handoffDiv);
+    scrollToBottom();
+}
+
+function handleNestedHandoffEvent(data) {
+    const handoffCard = activeHandoffs[data.child_session_id];
+    if (!handoffCard) return;
+
+    const eventsContainer = handoffCard.querySelector('.handoff-events');
+    if (!eventsContainer) return;
+
+    const innerEvent = data.event;
+    if (!innerEvent) return;
+
+    switch (innerEvent.type) {
+        case 'thinking':
+        case 'reasoning':
+            // Show reasoning as a compact note
+            const reasonDiv = document.createElement('div');
+            reasonDiv.className = 'handoff-reasoning';
+            reasonDiv.innerHTML = `<small class="text-muted"><i class="bi bi-lightbulb me-1"></i>${escapeHtml(innerEvent.content || innerEvent.message || '')}</small>`;
+            eventsContainer.appendChild(reasonDiv);
+            break;
+
+        case 'tool_call':
+            // Show tool call in compact form
+            const toolDiv = document.createElement('div');
+            toolDiv.className = 'tool-call';
+            toolDiv.dataset.toolName = innerEvent.name;
+            toolDiv.innerHTML = `
+                <div class="tool-header">
+                    <i class="bi bi-gear-fill text-info me-2"></i>
+                    <strong>${escapeHtml(innerEvent.name)}</strong>
+                    <span class="badge bg-warning status-badge ms-2">Running</span>
+                </div>
+                <div class="tool-input">
+                    <pre><code>${JSON.stringify(innerEvent.arguments, null, 2)}</code></pre>
+                </div>
+                <div class="tool-output" style="display: none;"></div>
+            `;
+            eventsContainer.appendChild(toolDiv);
+            break;
+
+        case 'tool_result':
+            // Update the corresponding tool call
+            const toolName = innerEvent.name;
+            const toolDivs = eventsContainer.querySelectorAll(`.tool-call[data-tool-name="${toolName}"]`);
+            const matchingTool = toolDivs[toolDivs.length - 1];
+            if (matchingTool) {
+                const statusBadge = matchingTool.querySelector('.status-badge');
+                if (statusBadge) {
+                    if (innerEvent.error) {
+                        statusBadge.className = 'badge bg-danger status-badge ms-2';
+                        statusBadge.textContent = 'Failed';
+                    } else {
+                        statusBadge.className = 'badge bg-success status-badge ms-2';
+                        statusBadge.textContent = 'Complete';
+                    }
+                }
+                const outputDiv = matchingTool.querySelector('.tool-output');
+                if (outputDiv) {
+                    outputDiv.style.display = 'block';
+                    if (innerEvent.error) {
+                        outputDiv.innerHTML = `<pre class="text-danger"><code>${escapeHtml(innerEvent.error)}</code></pre>`;
+                    } else {
+                        const result = typeof innerEvent.result === 'string' ? innerEvent.result : JSON.stringify(innerEvent.result, null, 2);
+                        outputDiv.innerHTML = `<pre><code>${escapeHtml(result)}</code></pre>`;
+                    }
+                }
+            }
+            break;
+
+        case 'handoff_start':
+            // Nested handoff - recurse
+            appendHandoffCard({ querySelector: () => eventsContainer }, innerEvent);
+            break;
+    }
+    scrollToBottom();
+}
+
+function updateHandoffComplete(data) {
+    const handoffCard = activeHandoffs[data.child_session_id];
+    if (!handoffCard) return;
+
+    // Update status badge
+    const statusBadge = handoffCard.querySelector('.handoff-status');
+    if (statusBadge) {
+        statusBadge.className = 'handoff-status complete';
+        statusBadge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Complete';
+    }
+
+    // Update duration
+    const durationSpan = handoffCard.querySelector('.handoff-duration');
+    if (durationSpan && data.duration_ms) {
+        const seconds = (data.duration_ms / 1000).toFixed(1);
+        durationSpan.textContent = `${seconds}s`;
+    }
+
+    // Show result
+    const resultDiv = handoffCard.querySelector('.handoff-result');
+    const resultContent = handoffCard.querySelector('.handoff-result-content');
+    if (resultDiv && resultContent && data.result_summary) {
+        resultDiv.style.display = 'block';
+        resultContent.textContent = data.result_summary;
+    }
+
+    // Update icon
+    const icon = handoffCard.querySelector('.handoff-icon');
+    if (icon) {
+        icon.className = 'bi bi-check-circle-fill handoff-icon';
+    }
+
+    // Clean up
+    delete activeHandoffs[data.child_session_id];
+    scrollToBottom();
+}
+
+function updateHandoffError(data) {
+    const handoffCard = activeHandoffs[data.child_session_id];
+    if (!handoffCard) return;
+
+    // Update status badge
+    const statusBadge = handoffCard.querySelector('.handoff-status');
+    if (statusBadge) {
+        statusBadge.className = 'handoff-status error';
+        statusBadge.innerHTML = '<i class="bi bi-x-circle me-1"></i>Failed';
+    }
+
+    // Show error in result area
+    const resultDiv = handoffCard.querySelector('.handoff-result');
+    const resultContent = handoffCard.querySelector('.handoff-result-content');
+    if (resultDiv && resultContent) {
+        resultDiv.style.display = 'block';
+        resultContent.innerHTML = `<span class="text-danger">${escapeHtml(data.error)}</span>`;
+    }
+
+    // Update icon
+    const icon = handoffCard.querySelector('.handoff-icon');
+    if (icon) {
+        icon.className = 'bi bi-x-circle-fill handoff-icon text-danger';
+    }
+
+    // Clean up
+    delete activeHandoffs[data.child_session_id];
+    scrollToBottom();
+}
+
+function toggleHandoff(header) {
+    const card = header.closest('.handoff-card');
+    if (card) {
+        card.classList.toggle('collapsed');
+    }
+}
+
+function toggleContext(toggle) {
+    const contextData = toggle.nextElementSibling;
+    if (contextData) {
+        contextData.classList.toggle('visible');
+        const icon = toggle.querySelector('i');
+        if (icon) {
+            icon.className = contextData.classList.contains('visible') ? 'bi bi-chevron-down' : 'bi bi-chevron-right';
+        }
     }
 }
 
@@ -338,14 +650,23 @@ function appendToolCall(thinkingDiv, data) {
     if (!thinkingDiv) return;
 
     const toolsContainer = thinkingDiv.querySelector('.tool-calls');
+    const toolName = data.name || data.tool_name;
     const toolDiv = document.createElement('div');
     toolDiv.className = 'tool-call';
-    toolDiv.id = `tool-${data.tool_id}`;
+    toolDiv.dataset.toolName = toolName;
+
+    const riskBadge = data.risk_level === 'high'
+        ? '<span class="badge bg-danger ms-2">High Risk</span>'
+        : data.risk_level === 'medium'
+        ? '<span class="badge bg-warning ms-2">Medium Risk</span>'
+        : '';
+
     toolDiv.innerHTML = `
         <div class="tool-header">
             <i class="bi bi-gear-fill text-info me-2"></i>
-            <strong>${escapeHtml(data.tool_name)}</strong>
-            <span class="badge bg-warning ms-2">Running</span>
+            <strong>${escapeHtml(toolName)}</strong>
+            <span class="badge bg-warning status-badge ms-2">Running</span>
+            ${riskBadge}
         </div>
         <div class="tool-input">
             <pre><code>${JSON.stringify(data.arguments, null, 2)}</code></pre>
@@ -356,18 +677,65 @@ function appendToolCall(thinkingDiv, data) {
     scrollToBottom();
 }
 
+function appendApprovalRequest(thinkingDiv, data) {
+    if (!thinkingDiv) return;
+
+    const toolsContainer = thinkingDiv.querySelector('.tool-calls');
+    const toolDiv = document.createElement('div');
+    toolDiv.className = 'tool-call approval-required';
+    toolDiv.innerHTML = `
+        <div class="tool-header">
+            <i class="bi bi-shield-exclamation text-danger me-2"></i>
+            <strong>Approval Required: ${escapeHtml(data.tool_name)}</strong>
+            <span class="badge bg-danger ms-2">${data.risk_level || 'High'} Risk</span>
+        </div>
+        <div class="tool-input">
+            <pre><code>${JSON.stringify(data.arguments, null, 2)}</code></pre>
+        </div>
+        <div class="approval-actions mt-2">
+            <p class="text-warning mb-2"><i class="bi bi-exclamation-triangle me-1"></i>This action requires approval before execution.</p>
+            <small class="text-muted">Approval must be granted through the Approvals page or Slack.</small>
+        </div>
+    `;
+    toolsContainer.appendChild(toolDiv);
+    scrollToBottom();
+}
+
 function updateToolResult(thinkingDiv, data) {
     if (!thinkingDiv) return;
 
-    const toolDiv = thinkingDiv.querySelector(`#tool-${data.tool_id}`);
+    const toolName = data.name || data.tool_name;
+    // Find the most recent tool call with this name that doesn't have a result yet
+    const toolDivs = thinkingDiv.querySelectorAll(`.tool-call[data-tool-name="${toolName}"]`);
+    const toolDiv = toolDivs[toolDivs.length - 1]; // Get the last one
+
     if (toolDiv) {
-        toolDiv.querySelector('.badge').className = 'badge bg-success ms-2';
-        toolDiv.querySelector('.badge').textContent = 'Complete';
+        const statusBadge = toolDiv.querySelector('.status-badge');
+        if (statusBadge) {
+            if (data.error) {
+                statusBadge.className = 'badge bg-danger status-badge ms-2';
+                statusBadge.textContent = 'Failed';
+            } else {
+                statusBadge.className = 'badge bg-success status-badge ms-2';
+                statusBadge.textContent = 'Complete';
+            }
+        }
 
         const outputDiv = toolDiv.querySelector('.tool-output');
-        outputDiv.style.display = 'block';
-        outputDiv.innerHTML = `<pre><code>${escapeHtml(JSON.stringify(data.result, null, 2))}</code></pre>`;
+        if (outputDiv) {
+            outputDiv.style.display = 'block';
+            if (data.error) {
+                outputDiv.innerHTML = `<pre class="text-danger"><code>${escapeHtml(data.error)}</code></pre>`;
+            } else {
+                const result = typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2);
+                outputDiv.innerHTML = `<pre><code>${escapeHtml(result)}</code></pre>`;
+            }
+            if (data.duration_ms) {
+                outputDiv.innerHTML += `<small class="text-muted">Completed in ${data.duration_ms}ms</small>`;
+            }
+        }
     }
+    scrollToBottom();
 }
 
 function toggleThinking(header) {
@@ -427,17 +795,154 @@ function newSession() {
 
 async function loadSession(sid) {
     try {
-        const messages = await api.get(`/api/chat/sessions/${sid}/messages`);
-        if (messages && messages.length > 0) {
-            sessionId = sid;
+        // First, check if session is still active
+        const sessionData = await api.get(`/api/chat/sessions/${sid}`);
+
+        // If session is not active, don't use it for new messages
+        // but still display the history
+        const isActive = sessionData.status === 'active';
+
+        // Load both messages and actions
+        const [messagesResponse, actionsResponse] = await Promise.all([
+            api.get(`/api/chat/sessions/${sid}/messages`),
+            api.get(`/api/chat/sessions/${sid}/actions?limit=500`)
+        ]);
+
+        const messages = messagesResponse.items || messagesResponse || [];
+        const actions = actionsResponse.items || actionsResponse || [];
+
+        if (messages.length > 0) {
+            // Only keep sessionId if the session is still active
+            if (isActive) {
+                sessionId = sid;
+            } else {
+                // Clear the stored session so a new one will be created
+                localStorage.removeItem(`netagent_session_${agentId}`);
+                sessionId = null;
+                console.log('[Chat] Previous session is not active (status:', sessionData.status, '), will create new session for next message');
+            }
             document.getElementById('welcome-message').style.display = 'none';
-            messages.forEach(msg => {
-                appendMessage(msg.role, msg.content);
-            });
+
+            // Show a notice if loading history from an inactive session
+            if (!isActive) {
+                const chatMessages = document.getElementById('chat-messages');
+                const notice = document.createElement('div');
+                notice.className = 'text-center py-2 mb-3';
+                notice.innerHTML = `
+                    <small class="text-muted">
+                        <i class="bi bi-clock-history me-1"></i>
+                        Previous conversation (${sessionData.status}). New messages will start a fresh session.
+                    </small>
+                `;
+                chatMessages.appendChild(notice);
+            }
+
+            // Group actions by message - actions between user messages belong to the following assistant message
+            let actionIndex = 0;
+
+            for (let i = 0; i < messages.length; i++) {
+                const msg = messages[i];
+                const messageDiv = appendMessage(msg.role, msg.content);
+
+                // For assistant messages, attach the actions that occurred before this message
+                if (msg.role === 'assistant' && messageDiv) {
+                    const thinkingDiv = messageDiv.querySelector('.thinking-section');
+                    const msgTime = new Date(msg.created_at).getTime();
+
+                    // Find actions that belong to this assistant response
+                    // (actions created before this message but after the previous assistant message)
+                    const prevAssistantMsg = messages.slice(0, i).reverse().find(m => m.role === 'assistant');
+                    const prevTime = prevAssistantMsg ? new Date(prevAssistantMsg.created_at).getTime() : 0;
+
+                    const relevantActions = actions.filter(action => {
+                        const actionTime = new Date(action.created_at).getTime();
+                        return actionTime > prevTime && actionTime <= msgTime;
+                    });
+
+                    if (relevantActions.length > 0 && thinkingDiv) {
+                        thinkingDiv.style.display = 'block';
+                        renderRestoredActions(thinkingDiv, relevantActions);
+                    }
+                }
+            }
         }
     } catch (error) {
-        console.log('Could not restore session');
+        console.log('Could not restore session:', error);
         localStorage.removeItem(`netagent_session_${agentId}`);
+    }
+}
+
+function renderRestoredActions(thinkingDiv, actions) {
+    const toolsContainer = thinkingDiv.querySelector('.tool-calls');
+    const reasoningContent = thinkingDiv.querySelector('.thinking-content');
+
+    // Process actions in order
+    for (const action of actions) {
+        if (action.action_type === 'thought' && action.reasoning) {
+            // Add reasoning
+            reasoningContent.innerHTML += `<div class="reasoning-step"><i class="bi bi-lightbulb text-warning me-2"></i>${escapeHtml(action.reasoning)}</div>`;
+        } else if (action.action_type === 'tool_call') {
+            // Add tool call
+            const toolDiv = document.createElement('div');
+            toolDiv.className = 'tool-call';
+            toolDiv.dataset.toolName = action.tool_name;
+
+            const riskBadge = action.risk_level === 'high'
+                ? '<span class="badge bg-danger ms-2">High Risk</span>'
+                : action.risk_level === 'medium'
+                ? '<span class="badge bg-warning ms-2">Medium Risk</span>'
+                : '';
+
+            toolDiv.innerHTML = `
+                <div class="tool-header">
+                    <i class="bi bi-gear-fill text-info me-2"></i>
+                    <strong>${escapeHtml(action.tool_name)}</strong>
+                    <span class="badge bg-secondary status-badge ms-2">${action.status === 'completed' ? 'Complete' : action.status}</span>
+                    ${riskBadge}
+                </div>
+                <div class="tool-input">
+                    <pre><code>${JSON.stringify(action.tool_input, null, 2)}</code></pre>
+                </div>
+                <div class="tool-output" style="display: none;"></div>
+            `;
+            toolsContainer.appendChild(toolDiv);
+        } else if (action.action_type === 'tool_result') {
+            // Find the matching tool call and update it
+            const toolDivs = toolsContainer.querySelectorAll(`.tool-call[data-tool-name="${action.tool_name}"]`);
+            const toolDiv = toolDivs[toolDivs.length - 1]; // Get most recent matching tool
+
+            if (toolDiv) {
+                const statusBadge = toolDiv.querySelector('.status-badge');
+                const outputDiv = toolDiv.querySelector('.tool-output');
+
+                if (statusBadge) {
+                    if (action.error_message) {
+                        statusBadge.textContent = 'Error';
+                        statusBadge.className = 'badge bg-danger status-badge ms-2';
+                    } else {
+                        statusBadge.textContent = 'Complete';
+                        statusBadge.className = 'badge bg-success status-badge ms-2';
+                    }
+                }
+
+                if (outputDiv) {
+                    outputDiv.style.display = 'block';
+                    const result = action.tool_output?.result || action.error_message || 'No output';
+                    const resultStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+                    const truncatedResult = resultStr.length > 2000 ? resultStr.substring(0, 2000) + '...(truncated)' : resultStr;
+                    outputDiv.innerHTML = `<pre><code>${escapeHtml(truncatedResult)}</code></pre>`;
+                    if (action.duration_ms) {
+                        outputDiv.innerHTML += `<small class="text-muted">${action.duration_ms}ms</small>`;
+                    }
+                }
+            }
+        }
+    }
+
+    // Update thinking header
+    const thinkingHeader = thinkingDiv.querySelector('.thinking-header span');
+    if (thinkingHeader) {
+        thinkingHeader.textContent = 'Show reasoning';
     }
 }
 
