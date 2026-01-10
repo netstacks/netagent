@@ -18,6 +18,24 @@
     </div>
 </div>
 
+<!-- Tabs -->
+<ul class="nav nav-tabs mb-4" id="agentsTabs" role="tablist">
+    <li class="nav-item">
+        <button class="nav-link active" id="agents-tab" data-bs-toggle="tab" data-bs-target="#agents-pane" type="button">
+            <i class="bi bi-robot me-1"></i>Agents
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" id="types-tab" data-bs-toggle="tab" data-bs-target="#types-pane" type="button" onclick="loadAgentTypes()">
+            <i class="bi bi-tags me-1"></i>Agent Types
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+<!-- Agents Tab -->
+<div class="tab-pane fade show active" id="agents-pane" role="tabpanel">
+
 <!-- Filters -->
 <div class="card mb-4">
     <div class="card-body py-2">
@@ -31,12 +49,7 @@
             <div class="col-md-3">
                 <select class="form-select" id="filter-type">
                     <option value="">All Types</option>
-                    <option value="triage">Triage</option>
-                    <option value="bgp">BGP</option>
-                    <option value="ospf">OSPF</option>
-                    <option value="validator">Validator</option>
-                    <option value="docs">Documentation</option>
-                    <option value="custom">Custom</option>
+                    <!-- Types will be loaded dynamically -->
                 </select>
             </div>
             <div class="col-md-3">
@@ -97,6 +110,70 @@
     </button>
 </div>
 
+</div><!-- End Agents Tab -->
+
+<!-- Agent Types Tab -->
+<div class="tab-pane fade" id="types-pane" role="tabpanel">
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-tags me-2"></i>Agent Types</h5>
+            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createTypeModal">
+                <i class="bi bi-plus-lg me-1"></i>Add Type
+            </button>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Display Name</th>
+                            <th>Description</th>
+                            <th>Icon</th>
+                            <th>Color</th>
+                            <th>System</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="types-tbody">
+                        <tr>
+                            <td colspan="7" class="text-center py-4">
+                                <div class="spinner-border spinner-border-sm" role="status"></div>
+                                <span class="ms-2">Loading agent types...</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Icon Reference -->
+    <div class="card">
+        <div class="card-header">
+            <h6 class="mb-0"><i class="bi bi-info-circle me-2"></i>Available Icons</h6>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">Use Bootstrap Icons class names (e.g., bi-robot, bi-gear). Common icons:</p>
+            <div class="d-flex flex-wrap gap-3">
+                <span class="badge bg-light text-dark"><i class="bi bi-robot me-1"></i>bi-robot</span>
+                <span class="badge bg-light text-dark"><i class="bi bi-gear me-1"></i>bi-gear</span>
+                <span class="badge bg-light text-dark"><i class="bi bi-diagram-3 me-1"></i>bi-diagram-3</span>
+                <span class="badge bg-light text-dark"><i class="bi bi-share me-1"></i>bi-share</span>
+                <span class="badge bg-light text-dark"><i class="bi bi-signpost-split me-1"></i>bi-signpost-split</span>
+                <span class="badge bg-light text-dark"><i class="bi bi-check-circle me-1"></i>bi-check-circle</span>
+                <span class="badge bg-light text-dark"><i class="bi bi-file-text me-1"></i>bi-file-text</span>
+                <span class="badge bg-light text-dark"><i class="bi bi-search me-1"></i>bi-search</span>
+                <span class="badge bg-light text-dark"><i class="bi bi-shield-check me-1"></i>bi-shield-check</span>
+                <span class="badge bg-light text-dark"><i class="bi bi-lightning me-1"></i>bi-lightning</span>
+            </div>
+            <p class="text-muted small mt-2 mb-0">Colors: primary, secondary, success, danger, warning, info, light, dark</p>
+        </div>
+    </div>
+</div><!-- End Types Tab -->
+
+</div><!-- End Tab Content -->
+
 <!-- Create Agent Modal -->
 <div class="modal fade" id="createAgentModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -106,10 +183,10 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted mb-4">Choose a template to start with, or create a custom agent from scratch.</p>
+                <p class="text-muted mb-3">Select an agent type to get started. Each type has a specialized system prompt.</p>
 
-                <div id="templates-grid" class="row g-3">
-                    <!-- Templates will be loaded here -->
+                <div id="agent-types-grid" class="row g-3">
+                    <!-- Agent types will be loaded here -->
                 </div>
             </div>
             <div class="modal-footer">
@@ -119,7 +196,7 @@
     </div>
 </div>
 
-<!-- Delete Confirmation Modal -->
+<!-- Delete Agent Confirmation Modal -->
 <div class="modal fade" id="deleteAgentModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -138,36 +215,153 @@
         </div>
     </div>
 </div>
+
+<!-- Create/Edit Agent Type Modal -->
+<div class="modal fade" id="createTypeModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="typeModalTitle">Add Agent Type</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="type-form">
+                    <input type="hidden" id="type-id">
+                    <div class="mb-3">
+                        <label class="form-label">Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="type-name" required
+                               placeholder="e.g., network-config" pattern="[a-z0-9-]+"
+                               title="Lowercase letters, numbers, and hyphens only">
+                        <div class="form-text">Lowercase, no spaces (used in code)</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Display Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="type-display-name" required
+                               placeholder="e.g., Network Configuration">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" id="type-description" rows="2"
+                                  placeholder="What is this agent type used for?"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">System Prompt</label>
+                        <textarea class="form-control font-monospace" id="type-system-prompt" rows="6"
+                                  placeholder="Default system prompt for agents of this type..."></textarea>
+                        <div class="form-text">This prompt defines the agent's specialized behavior and capabilities.</div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Icon</label>
+                                <div class="input-group">
+                                    <span class="input-group-text" id="type-icon-preview"><i class="bi bi-robot"></i></span>
+                                    <input type="text" class="form-control" id="type-icon" value="bi-robot"
+                                           placeholder="bi-robot">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Color</label>
+                                <select class="form-select" id="type-color">
+                                    <option value="primary">Primary (Blue)</option>
+                                    <option value="secondary">Secondary (Gray)</option>
+                                    <option value="success">Success (Green)</option>
+                                    <option value="danger">Danger (Red)</option>
+                                    <option value="warning">Warning (Yellow)</option>
+                                    <option value="info">Info (Cyan)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Preview</label>
+                        <div id="type-preview" class="p-2 border rounded">
+                            <span class="badge bg-primary">
+                                <i class="bi bi-robot me-1"></i>network-config
+                            </span>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btn-save-type">Save Type</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Type Confirmation Modal -->
+<div class="modal fade" id="deleteTypeModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Delete Agent Type</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete the type <strong id="delete-type-name"></strong>?</p>
+                <p class="text-muted small">This cannot be undone. You cannot delete types that are in use by agents.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="btn-confirm-delete-type">Delete Type</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-const agentTypeIcons = {
+// Agent type data from API (loaded dynamically)
+let agentTypes = [];
+let agentTypeMap = {};  // name -> type object
+
+// Fallback defaults (used before types are loaded)
+const defaultTypeIcons = {
     'triage': 'bi-signpost-split',
     'bgp': 'bi-diagram-3',
     'ospf': 'bi-share',
     'validator': 'bi-check-circle',
     'docs': 'bi-file-text',
-    'custom': 'bi-gear'
+    'custom': 'bi-gear',
+    'ephemeral': 'bi-lightning'
 };
 
-const agentTypeColors = {
+const defaultTypeColors = {
     'triage': 'primary',
     'bgp': 'info',
     'ospf': 'success',
     'validator': 'warning',
     'docs': 'secondary',
-    'documentation': 'secondary',
-    'custom': 'primary'
+    'custom': 'primary',
+    'ephemeral': 'secondary'
 };
 
+// Helper functions to get icon/color with fallback
+function getTypeIcon(typeName) {
+    const typeData = agentTypeMap[typeName];
+    return typeData?.icon || defaultTypeIcons[typeName] || 'bi-robot';
+}
+
+function getTypeColor(typeName) {
+    const typeData = agentTypeMap[typeName];
+    return typeData?.color || defaultTypeColors[typeName] || 'secondary';
+}
+
 let agents = [];
-let templates = [];
 let deleteAgentId = null;
+let deleteTypeId = null;
+let editingTypeId = null;
 
 document.addEventListener('DOMContentLoaded', function() {
-    loadAgents();
-    loadTemplates();
+    loadAgentTypes().then(() => {
+        loadAgents();
+        renderAgentTypesForCreate();
+    });
 
     // View mode toggle
     document.getElementById('view-grid').addEventListener('change', toggleView);
@@ -179,11 +373,72 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('filter-status').addEventListener('change', filterAgents);
 
     // Refresh button
-    document.getElementById('btn-refresh').addEventListener('click', loadAgents);
+    document.getElementById('btn-refresh').addEventListener('click', () => {
+        loadAgentTypes().then(() => loadAgents());
+    });
 
     // Delete confirmation
     document.getElementById('btn-confirm-delete').addEventListener('click', confirmDelete);
+
+    // Agent Type form
+    document.getElementById('btn-save-type').addEventListener('click', saveAgentType);
+    document.getElementById('btn-confirm-delete-type').addEventListener('click', confirmDeleteType);
+
+    // Live preview for type icon
+    document.getElementById('type-icon').addEventListener('input', updateTypePreview);
+    document.getElementById('type-color').addEventListener('change', updateTypePreview);
+    document.getElementById('type-name').addEventListener('input', updateTypePreview);
+
+    // Reset form when modal opens for new type
+    document.getElementById('createTypeModal').addEventListener('show.bs.modal', function(e) {
+        if (!editingTypeId) {
+            document.getElementById('type-form').reset();
+            document.getElementById('type-id').value = '';
+            document.getElementById('type-system-prompt').value = '';
+            document.getElementById('typeModalTitle').textContent = 'Add Agent Type';
+            document.getElementById('type-name').disabled = false;
+            updateTypePreview();
+        }
+    });
+
+    document.getElementById('createTypeModal').addEventListener('hidden.bs.modal', function() {
+        editingTypeId = null;
+    });
 });
+
+async function loadAgentTypes() {
+    try {
+        const response = await api.get('/api/agents/types');
+        agentTypes = response.items || [];
+
+        // Build lookup map
+        agentTypeMap = {};
+        agentTypes.forEach(t => {
+            agentTypeMap[t.name] = t;
+        });
+
+        // Update filter dropdown
+        const filterSelect = document.getElementById('filter-type');
+        filterSelect.innerHTML = '<option value="">All Types</option>' +
+            agentTypes.map(t => `<option value="${t.name}">${t.display_name}</option>`).join('');
+
+        // Render the types table
+        renderAgentTypes();
+
+        return agentTypes;
+    } catch (error) {
+        console.error('Failed to load agent types:', error);
+        // Show error in types table
+        document.getElementById('types-tbody').innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center py-4 text-danger">
+                    Failed to load agent types. Please try again.
+                </td>
+            </tr>
+        `;
+        return [];
+    }
+}
 
 async function loadAgents() {
     try {
@@ -192,16 +447,6 @@ async function loadAgents() {
         renderAgents();
     } catch (error) {
         showToast('Failed to load agents', 'error');
-    }
-}
-
-async function loadTemplates() {
-    try {
-        const response = await api.get('/api/agents/templates');
-        templates = response.items || response || [];
-        renderTemplates();
-    } catch (error) {
-        console.error('Failed to load templates:', error);
     }
 }
 
@@ -227,12 +472,12 @@ function renderAgents() {
             <div class="card h-100 agent-card" data-agent-id="${agent.id}">
                 <div class="card-body">
                     <div class="d-flex align-items-start mb-3">
-                        <div class="agent-icon bg-${agentTypeColors[agent.agent_type] || 'secondary'} bg-opacity-10 text-${agentTypeColors[agent.agent_type] || 'secondary'} rounded p-2 me-3">
-                            <i class="bi ${agentTypeIcons[agent.agent_type] || 'bi-robot'} fs-4"></i>
+                        <div class="agent-icon bg-${getTypeColor(agent.agent_type)} bg-opacity-10 text-${getTypeColor(agent.agent_type)} rounded p-2 me-3">
+                            <i class="bi ${getTypeIcon(agent.agent_type)} fs-4"></i>
                         </div>
                         <div class="flex-grow-1">
                             <h5 class="card-title mb-1">${escapeHtml(agent.name)}</h5>
-                            <span class="badge bg-${agentTypeColors[agent.agent_type] || 'secondary'}">${agent.agent_type}</span>
+                            <span class="badge bg-${getTypeColor(agent.agent_type)}">${agent.agent_type}</span>
                             ${agent.enabled ? '' : '<span class="badge bg-danger ms-1">Disabled</span>'}
                         </div>
                         <div class="dropdown">
@@ -267,8 +512,8 @@ function renderAgents() {
         <tr>
             <td>
                 <div class="d-flex align-items-center">
-                    <div class="agent-icon-sm bg-${agentTypeColors[agent.agent_type] || 'secondary'} bg-opacity-10 text-${agentTypeColors[agent.agent_type] || 'secondary'} rounded p-1 me-2">
-                        <i class="bi ${agentTypeIcons[agent.agent_type] || 'bi-robot'}"></i>
+                    <div class="agent-icon-sm bg-${getTypeColor(agent.agent_type)} bg-opacity-10 text-${getTypeColor(agent.agent_type)} rounded p-1 me-2">
+                        <i class="bi ${getTypeIcon(agent.agent_type)}"></i>
                     </div>
                     <div>
                         <strong>${escapeHtml(agent.name)}</strong>
@@ -276,7 +521,7 @@ function renderAgents() {
                     </div>
                 </div>
             </td>
-            <td><span class="badge bg-${agentTypeColors[agent.agent_type] || 'secondary'}">${agent.agent_type}</span></td>
+            <td><span class="badge bg-${getTypeColor(agent.agent_type)}">${agent.agent_type}</span></td>
             <td><code>${agent.model}</code></td>
             <td>-</td>
             <td>-</td>
@@ -291,28 +536,6 @@ function renderAgents() {
                 <button class="btn btn-sm btn-outline-danger" onclick="showDeleteModal(${agent.id}, '${escapeHtml(agent.name)}')"><i class="bi bi-trash"></i></button>
             </td>
         </tr>
-    `).join('');
-}
-
-function renderTemplates() {
-    const grid = document.getElementById('templates-grid');
-    grid.innerHTML = templates.map(template => `
-        <div class="col-md-6">
-            <a href="/agents/new?template=${template.id}" class="card template-card h-100 text-decoration-none">
-                <div class="card-body">
-                    <div class="d-flex align-items-center mb-2">
-                        <div class="agent-icon bg-${agentTypeColors[template.agent_type] || 'secondary'} bg-opacity-10 text-${agentTypeColors[template.agent_type] || 'secondary'} rounded p-2 me-3">
-                            <i class="bi ${template.icon || agentTypeIcons[template.agent_type] || 'bi-robot'} fs-5"></i>
-                        </div>
-                        <div>
-                            <h6 class="mb-0">${escapeHtml(template.name)}</h6>
-                            <small class="text-muted">${template.agent_type}</small>
-                        </div>
-                    </div>
-                    <p class="card-text small text-muted mb-0">${escapeHtml(template.description || '')}</p>
-                </div>
-            </a>
-        </div>
     `).join('');
 }
 
@@ -371,6 +594,191 @@ async function duplicateAgent(agentId) {
     } catch (error) {
         showToast('Failed to duplicate agent', 'error');
     }
+}
+
+// =============================================================================
+// Agent Types Management
+// =============================================================================
+
+function renderAgentTypes() {
+    const tbody = document.getElementById('types-tbody');
+
+    if (agentTypes.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center py-4 text-muted">
+                    No agent types defined. Add one to get started.
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = agentTypes.map(type => `
+        <tr>
+            <td><code>${escapeHtml(type.name)}</code></td>
+            <td>${escapeHtml(type.display_name)}</td>
+            <td><small class="text-muted">${escapeHtml(type.description || '-')}</small></td>
+            <td>
+                <span class="badge bg-light text-dark">
+                    <i class="bi ${type.icon} me-1"></i>${type.icon}
+                </span>
+            </td>
+            <td><span class="badge bg-${type.color}">${type.color}</span></td>
+            <td>
+                ${type.is_system
+                    ? '<span class="badge bg-info">System</span>'
+                    : '<span class="badge bg-secondary">Custom</span>'}
+            </td>
+            <td class="text-end">
+                <button class="btn btn-sm btn-outline-secondary me-1" onclick="editAgentType(${type.id})" title="Edit">
+                    <i class="bi bi-pencil"></i>
+                </button>
+                ${type.is_system ? '' : `
+                    <button class="btn btn-sm btn-outline-danger" onclick="showDeleteTypeModal(${type.id}, '${escapeHtml(type.name)}')" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                `}
+            </td>
+        </tr>
+    `).join('');
+}
+
+function updateTypePreview() {
+    const name = document.getElementById('type-name').value || 'type-name';
+    const icon = document.getElementById('type-icon').value || 'bi-robot';
+    const color = document.getElementById('type-color').value || 'primary';
+
+    // Update icon preview
+    document.getElementById('type-icon-preview').innerHTML = `<i class="bi ${icon}"></i>`;
+
+    // Update badge preview
+    document.getElementById('type-preview').innerHTML = `
+        <span class="badge bg-${color}">
+            <i class="bi ${icon} me-1"></i>${name}
+        </span>
+    `;
+}
+
+function editAgentType(typeId) {
+    const type = agentTypes.find(t => t.id === typeId);
+    if (!type) return;
+
+    editingTypeId = typeId;
+
+    document.getElementById('type-id').value = type.id;
+    document.getElementById('type-name').value = type.name;
+    document.getElementById('type-name').disabled = true;  // Can't change name
+    document.getElementById('type-display-name').value = type.display_name;
+    document.getElementById('type-description').value = type.description || '';
+    document.getElementById('type-system-prompt').value = type.system_prompt || '';
+    document.getElementById('type-icon').value = type.icon;
+    document.getElementById('type-color').value = type.color;
+    document.getElementById('typeModalTitle').textContent = 'Edit Agent Type';
+
+    updateTypePreview();
+    new bootstrap.Modal(document.getElementById('createTypeModal')).show();
+}
+
+async function saveAgentType() {
+    const typeId = document.getElementById('type-id').value;
+    const data = {
+        name: document.getElementById('type-name').value,
+        display_name: document.getElementById('type-display-name').value,
+        description: document.getElementById('type-description').value || null,
+        system_prompt: document.getElementById('type-system-prompt').value || null,
+        icon: document.getElementById('type-icon').value || 'bi-robot',
+        color: document.getElementById('type-color').value || 'primary',
+    };
+
+    if (!data.name || !data.display_name) {
+        showToast('Name and display name are required', 'warning');
+        return;
+    }
+
+    try {
+        if (typeId) {
+            // Update existing
+            await api.put(`/api/agents/types/${typeId}`, data);
+            showToast('Agent type updated', 'success');
+        } else {
+            // Create new
+            await api.post('/api/agents/types', data);
+            showToast('Agent type created', 'success');
+        }
+
+        bootstrap.Modal.getInstance(document.getElementById('createTypeModal')).hide();
+        await loadAgentTypes();
+        renderAgentTypes();
+        renderAgentTypesForCreate();
+    } catch (error) {
+        const msg = error.response?.data?.detail || error.message || 'Failed to save agent type';
+        showToast(msg, 'error');
+    }
+}
+
+function showDeleteTypeModal(typeId, typeName) {
+    deleteTypeId = typeId;
+    document.getElementById('delete-type-name').textContent = typeName;
+    new bootstrap.Modal(document.getElementById('deleteTypeModal')).show();
+}
+
+async function confirmDeleteType() {
+    if (!deleteTypeId) return;
+
+    try {
+        await api.delete(`/api/agents/types/${deleteTypeId}`);
+        bootstrap.Modal.getInstance(document.getElementById('deleteTypeModal')).hide();
+        showToast('Agent type deleted', 'success');
+        await loadAgentTypes();
+        renderAgentTypes();
+    } catch (error) {
+        const msg = error.response?.data?.detail || error.message || 'Failed to delete agent type';
+        showToast(msg, 'error');
+    }
+}
+
+// =============================================================================
+// Render Agent Types for Create Modal
+// =============================================================================
+
+function renderAgentTypesForCreate() {
+    const grid = document.getElementById('agent-types-grid');
+
+    // Filter out ephemeral type - users shouldn't create those manually
+    const creatableTypes = agentTypes.filter(t => t.name !== 'ephemeral');
+
+    if (creatableTypes.length === 0) {
+        grid.innerHTML = '<div class="col-12 text-center text-muted py-3">No agent types available.</div>';
+        return;
+    }
+
+    grid.innerHTML = creatableTypes.map(type => `
+        <div class="col-md-6">
+            <a href="/agents/new?type=${type.name}" class="card type-card h-100 text-decoration-none border-2 hover-shadow">
+                <div class="card-body">
+                    <div class="d-flex align-items-center mb-2">
+                        <div class="agent-icon bg-${type.color} bg-opacity-10 text-${type.color} rounded p-2 me-3">
+                            <i class="bi ${type.icon} fs-5"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <h6 class="mb-0">${escapeHtml(type.display_name)}</h6>
+                            <small class="text-muted">${escapeHtml(type.name)}</small>
+                        </div>
+                        ${type.system_prompt ? '<i class="bi bi-chat-square-text text-success" title="Has system prompt"></i>' : '<i class="bi bi-chat-square text-muted" title="No system prompt"></i>'}
+                    </div>
+                    <p class="card-text small text-muted mb-0">${escapeHtml(type.description || 'No description')}</p>
+                    ${type.system_prompt ? `
+                        <div class="mt-2 pt-2 border-top">
+                            <small class="text-muted font-monospace" style="font-size: 0.7rem;">
+                                ${escapeHtml(type.system_prompt.substring(0, 100))}${type.system_prompt.length > 100 ? '...' : ''}
+                            </small>
+                        </div>
+                    ` : ''}
+                </div>
+            </a>
+        </div>
+    `).join('');
 }
 
 function escapeHtml(text) {

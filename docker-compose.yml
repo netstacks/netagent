@@ -82,6 +82,7 @@ services:
       - GEMINI_EMBEDDING_API_URL=${GEMINI_EMBEDDING_API_URL}
       - GEMINI_USER_EMAIL=${GEMINI_USER_EMAIL}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - EMBEDDING_SERVER_URL=http://embedding:8002
       - SMTP_SERVER=${SMTP_SERVER:-localhost}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_FROM=${SMTP_FROM:-netagent@localhost}
@@ -93,7 +94,7 @@ services:
       - ./services/api/app/services:/app/services:ro
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.api.rule=PathPrefix(`/api/`) || Path(`/api`)"
       - "traefik.http.routers.api.priority=10"
       - "traefik.http.services.api.loadbalancer.server.port=8001"
     networks:
@@ -102,6 +103,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      embedding:
         condition: service_healthy
 
   worker:
@@ -123,7 +126,12 @@ services:
       - CONFLUENCE_BASE_URL=${CONFLUENCE_BASE_URL}
       - CONFLUENCE_USERNAME=${CONFLUENCE_USERNAME}
       - CONFLUENCE_API_TOKEN=${CONFLUENCE_API_TOKEN}
+      - SMTP_SERVER=${SMTP_SERVER}
+      - SMTP_PORT=${SMTP_PORT:-25}
+      - SMTP_FROM=${EMAIL_FROM_ADDRESS:-netagent@localhost}
       - PYTHONUNBUFFERED=1
+    volumes:
+      - ./shared:/app/shared:ro
     networks:
       - netagent
     depends_on:

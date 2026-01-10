@@ -145,17 +145,18 @@ Use this tool to find answers from internal documentation, runbooks, and wiki pa
         try:
             with self.db_session_factory() as db:
                 # Build query with pgvector cosine similarity
+                # Use CAST instead of :: to avoid SQLAlchemy parameter parsing issues
                 sql = text("""
                     SELECT
                         kc.content,
                         kc.chunk_metadata,
                         kd.title,
                         kd.source_url as url,
-                        1 - (kc.embedding <=> :query_embedding::vector) as similarity
+                        1 - (kc.embedding <=> CAST(:query_embedding AS vector)) as similarity
                     FROM knowledge_chunks kc
                     JOIN knowledge_documents kd ON kc.document_id = kd.id
                     WHERE kd.knowledge_base_id = ANY(:kb_ids)
-                    ORDER BY kc.embedding <=> :query_embedding::vector
+                    ORDER BY kc.embedding <=> CAST(:query_embedding AS vector)
                     LIMIT :top_k
                 """)
 

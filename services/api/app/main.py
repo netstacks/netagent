@@ -18,6 +18,7 @@ from routes import (
     knowledge,
     devices,
     mcp,
+    api_resources,
     approvals,
     audit,
     triggers,
@@ -47,7 +48,8 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized")
 
     # Seed default data
-    from services.seed import seed_agent_templates
+    from services.seed import seed_agent_types, seed_agent_templates
+    seed_agent_types()
     seed_agent_templates()
 
     yield
@@ -57,9 +59,29 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="NetAgent API",
-    description="AI Agent Platform for Network Engineering",
+    description="""
+## AI Agent Platform for Network Engineering
+
+NetAgent provides AI-powered agents for network automation, troubleshooting, and management.
+
+### Features
+- **Agents**: Create and manage AI agents with specialized capabilities
+- **Chat**: Interact with agents via streaming chat interface
+- **Knowledge Bases**: RAG-powered document retrieval for agents
+- **MCP Servers**: Model Context Protocol server integration
+- **API Resources**: Custom REST API endpoints as agent tools
+- **Jobs**: Background task execution and scheduling
+- **Triggers**: Event-driven automation via Slack, webhooks, and schedules
+
+### Authentication
+In production, authentication is handled via AWS ALB OIDC headers.
+In development mode (DEV_MODE=true), a mock admin user is used.
+""",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
 )
 
 # CORS middleware
@@ -77,6 +99,7 @@ app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(knowledge.router, prefix="/api/knowledge", tags=["Knowledge"])
 app.include_router(devices.router, prefix="/api/devices", tags=["Devices"])
 app.include_router(mcp.router, prefix="/api/mcp", tags=["MCP"])
+app.include_router(api_resources.router, prefix="/api/api-resources", tags=["API Resources"])
 app.include_router(approvals.router, prefix="/api/approvals", tags=["Approvals"])
 app.include_router(audit.router, prefix="/api/audit", tags=["Audit"])
 app.include_router(triggers.router, prefix="/api/triggers", tags=["Triggers"])

@@ -1,0 +1,446 @@
+{% extends "base.html" %}
+
+{% block title %}Knowledge Base - NetAgent{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1">
+                <li class="breadcrumb-item"><a href="/knowledge">Knowledge Bases</a></li>
+                <li class="breadcrumb-item active" id="kb-name-breadcrumb">Loading...</li>
+            </ol>
+        </nav>
+        <h2 class="mb-1" id="kb-name">Loading...</h2>
+        <p class="text-muted mb-0" id="kb-description"></p>
+    </div>
+    <div>
+        <button class="btn btn-outline-secondary me-2" onclick="loadKnowledgeBase()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        <button class="btn btn-outline-primary me-2" onclick="syncKnowledgeBase()">
+            <i class="bi bi-cloud-download"></i> Sync
+        </button>
+        <button class="btn btn-primary" id="btn-show-upload" data-bs-toggle="modal" data-bs-target="#uploadDocModal">
+            <i class="bi bi-plus-circle"></i> Add Document
+        </button>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body text-center">
+                <h3 class="mb-0" id="stat-documents">-</h3>
+                <small class="text-muted">Documents</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body text-center">
+                <h3 class="mb-0" id="stat-chunks">-</h3>
+                <small class="text-muted">Chunks</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body text-center">
+                <h3 class="mb-0" id="stat-type">-</h3>
+                <small class="text-muted">Source Type</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body text-center">
+                <span class="badge bg-secondary" id="stat-status">-</span>
+                <br><small class="text-muted">Status</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Documents Table -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>Documents</h5>
+        <div class="input-group" style="width: 300px;">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="search-docs" placeholder="Search documents...">
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Source</th>
+                        <th>Chunks</th>
+                        <th>Indexed</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="documents-tbody">
+                    <tr>
+                        <td colspan="5" class="text-center py-4">
+                            <div class="spinner-border spinner-border-sm" role="status"></div>
+                            <span class="ms-2">Loading documents...</span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Empty State -->
+<div id="docs-empty" class="text-center py-5 d-none">
+    <i class="bi bi-file-earmark-x display-1 text-muted"></i>
+    <h4 class="mt-3">No Documents</h4>
+    <p class="text-muted">Upload documents or sync from the source to add content</p>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadDocModal">
+        <i class="bi bi-plus-circle"></i> Add Document
+    </button>
+</div>
+
+<!-- Add Document Modal -->
+<div class="modal fade" id="uploadDocModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Document</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="upload-form">
+                    <div class="mb-3">
+                        <label class="form-label">Document Title <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="doc-title" required placeholder="e.g., Network Device Guide">
+                    </div>
+
+                    <!-- Tab selection for input method -->
+                    <ul class="nav nav-tabs mb-3" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="paste-tab" data-bs-toggle="tab" data-bs-target="#paste-content" type="button" role="tab">
+                                <i class="bi bi-clipboard me-1"></i>Paste Content
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="file-tab" data-bs-toggle="tab" data-bs-target="#file-content" type="button" role="tab">
+                                <i class="bi bi-file-earmark-arrow-up me-1"></i>Upload File
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content">
+                        <!-- Paste Content Tab -->
+                        <div class="tab-pane fade show active" id="paste-content" role="tabpanel">
+                            <div class="mb-3">
+                                <label class="form-label">Content <span class="text-danger">*</span></label>
+                                <textarea class="form-control font-monospace" id="doc-content" rows="12"
+                                          placeholder="Paste your document content here...&#10;&#10;Supports plain text, Markdown, code, etc."></textarea>
+                                <div class="form-text">Paste text, markdown, code, or any text-based content</div>
+                            </div>
+                        </div>
+
+                        <!-- File Upload Tab -->
+                        <div class="tab-pane fade" id="file-content" role="tabpanel">
+                            <div class="mb-3">
+                                <label class="form-label">Select File</label>
+                                <input type="file" class="form-control" id="doc-file"
+                                       accept=".txt,.md,.pdf,.json,.yaml,.yml,.py,.js,.ts,.html,.css,.xml,.csv,.log">
+                                <div class="form-text">Supported: txt, md, json, yaml, py, js, ts, html, css, xml, csv, log</div>
+                            </div>
+                            <div id="file-preview" class="d-none">
+                                <label class="form-label">File Preview</label>
+                                <pre class="bg-light p-3 rounded border" style="max-height: 200px; overflow-y: auto;"><code id="file-preview-content"></code></pre>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Source URL <small class="text-muted">(optional)</small></label>
+                        <input type="text" class="form-control" id="doc-source-url" placeholder="e.g., https://docs.example.com/guide">
+                        <div class="form-text">Reference URL for this document</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btn-upload">
+                    <i class="bi bi-plus-circle me-1"></i>Add Document
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteDocModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Delete Document</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete <strong id="delete-doc-name"></strong>?</p>
+                <p class="text-muted small">This will remove all indexed chunks from the vector store.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="btn-confirm-delete">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const KB_ID = {{ kb_id }};
+let knowledgeBase = null;
+let documents = [];
+let deleteDocId = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadKnowledgeBase();
+
+    document.getElementById('search-docs').addEventListener('input', filterDocuments);
+    document.getElementById('btn-upload').addEventListener('click', uploadDocument);
+    document.getElementById('btn-confirm-delete').addEventListener('click', confirmDeleteDoc);
+
+    // File preview on selection
+    document.getElementById('doc-file').addEventListener('change', async function(e) {
+        const file = e.target.files[0];
+        const previewDiv = document.getElementById('file-preview');
+        const previewContent = document.getElementById('file-preview-content');
+
+        if (file) {
+            try {
+                const content = await file.text();
+                previewContent.textContent = content.substring(0, 2000) + (content.length > 2000 ? '\n\n... (truncated)' : '');
+                previewDiv.classList.remove('d-none');
+
+                // Auto-fill title from filename if empty
+                const titleInput = document.getElementById('doc-title');
+                if (!titleInput.value) {
+                    titleInput.value = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+                }
+            } catch (err) {
+                previewContent.textContent = 'Unable to preview file';
+                previewDiv.classList.remove('d-none');
+            }
+        } else {
+            previewDiv.classList.add('d-none');
+        }
+    });
+
+    // Reset form when modal is hidden
+    document.getElementById('uploadDocModal').addEventListener('hidden.bs.modal', function() {
+        document.getElementById('upload-form').reset();
+        document.getElementById('file-preview').classList.add('d-none');
+        // Reset to paste tab
+        document.getElementById('paste-tab').click();
+    });
+});
+
+async function loadKnowledgeBase() {
+    try {
+        // Load KB info
+        const kbResponse = await api.get(`/api/knowledge/${KB_ID}`);
+        knowledgeBase = kbResponse;
+
+        document.getElementById('kb-name').textContent = knowledgeBase.name;
+        document.getElementById('kb-name-breadcrumb').textContent = knowledgeBase.name;
+        document.getElementById('kb-description').textContent = knowledgeBase.description || '';
+        document.getElementById('stat-type').textContent = knowledgeBase.source_type;
+        document.getElementById('stat-status').textContent = knowledgeBase.status || 'ready';
+        document.getElementById('stat-status').className = `badge bg-${knowledgeBase.status === 'ready' ? 'success' : 'warning'}`;
+
+        // Load documents
+        await loadDocuments();
+    } catch (error) {
+        console.error('Failed to load knowledge base:', error);
+        showToast('Failed to load knowledge base', 'error');
+    }
+}
+
+async function loadDocuments() {
+    const tbody = document.getElementById('documents-tbody');
+
+    try {
+        const response = await api.get(`/api/knowledge/${KB_ID}/documents`);
+        documents = response.items || response || [];
+
+        document.getElementById('stat-documents').textContent = documents.length;
+
+        // Calculate total chunks
+        const totalChunks = documents.reduce((sum, doc) => sum + (doc.chunk_count || 0), 0);
+        document.getElementById('stat-chunks').textContent = totalChunks;
+
+        renderDocuments();
+    } catch (error) {
+        console.error('Failed to load documents:', error);
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5" class="text-center py-4 text-danger">
+                    Failed to load documents
+                </td>
+            </tr>
+        `;
+    }
+}
+
+function renderDocuments() {
+    const tbody = document.getElementById('documents-tbody');
+    const emptyState = document.getElementById('docs-empty');
+    const searchQuery = document.getElementById('search-docs').value.toLowerCase();
+
+    const filtered = documents.filter(doc =>
+        !searchQuery ||
+        doc.title?.toLowerCase().includes(searchQuery) ||
+        doc.source?.toLowerCase().includes(searchQuery)
+    );
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = '';
+        emptyState.classList.remove('d-none');
+        return;
+    }
+
+    emptyState.classList.add('d-none');
+
+    tbody.innerHTML = filtered.map(doc => `
+        <tr>
+            <td>
+                <i class="bi bi-file-earmark-text me-2 text-muted"></i>
+                <strong>${escapeHtml(doc.title || doc.source || 'Untitled')}</strong>
+            </td>
+            <td>
+                <code class="small">${escapeHtml(doc.source || '-')}</code>
+            </td>
+            <td>${doc.chunk_count || 0}</td>
+            <td>${doc.indexed_at ? formatDate(doc.indexed_at) : '-'}</td>
+            <td class="text-end">
+                <button class="btn btn-sm btn-outline-danger" onclick="showDeleteDocModal(${doc.id}, '${escapeHtml(doc.title || doc.source)}')">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function filterDocuments() {
+    renderDocuments();
+}
+
+async function syncKnowledgeBase() {
+    try {
+        showToast('Syncing knowledge base...', 'info');
+        await api.post(`/api/knowledge/${KB_ID}/sync`);
+        showToast('Sync started', 'success');
+        setTimeout(loadDocuments, 2000);
+    } catch (error) {
+        showToast('Failed to sync: ' + error.message, 'error');
+    }
+}
+
+async function uploadDocument() {
+    const title = document.getElementById('doc-title').value.trim();
+    const pastedContent = document.getElementById('doc-content').value.trim();
+    const fileInput = document.getElementById('doc-file');
+    const sourceUrl = document.getElementById('doc-source-url').value.trim();
+
+    // Check which tab is active
+    const isPasteTab = document.getElementById('paste-content').classList.contains('show');
+
+    if (!title) {
+        showToast('Please provide a document title', 'warning');
+        return;
+    }
+
+    let content = '';
+
+    if (isPasteTab) {
+        // Using pasted content
+        if (!pastedContent) {
+            showToast('Please paste some content', 'warning');
+            return;
+        }
+        content = pastedContent;
+    } else {
+        // Using file upload
+        if (!fileInput.files[0]) {
+            showToast('Please select a file', 'warning');
+            return;
+        }
+        try {
+            content = await fileInput.files[0].text();
+        } catch (err) {
+            showToast('Failed to read file', 'error');
+            return;
+        }
+    }
+
+    const btn = document.getElementById('btn-upload');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Adding...';
+
+    try {
+        // Send as JSON to match API expectation
+        const response = await api.post(`/api/knowledge/${KB_ID}/documents`, {
+            title: title,
+            content: content,
+            source_url: sourceUrl || (fileInput.files[0] ? fileInput.files[0].name : null)
+        });
+
+        bootstrap.Modal.getInstance(document.getElementById('uploadDocModal')).hide();
+        document.getElementById('upload-form').reset();
+        showToast('Document added successfully', 'success');
+        loadDocuments();
+    } catch (error) {
+        showToast('Failed to add document: ' + (error.message || 'Unknown error'), 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-plus-circle me-1"></i>Add Document';
+    }
+}
+
+function showDeleteDocModal(docId, docName) {
+    deleteDocId = docId;
+    document.getElementById('delete-doc-name').textContent = docName;
+    new bootstrap.Modal(document.getElementById('deleteDocModal')).show();
+}
+
+async function confirmDeleteDoc() {
+    if (!deleteDocId) return;
+
+    try {
+        await api.delete(`/api/knowledge/${KB_ID}/documents/${deleteDocId}`);
+        bootstrap.Modal.getInstance(document.getElementById('deleteDocModal')).hide();
+        showToast('Document deleted', 'success');
+        loadDocuments();
+    } catch (error) {
+        showToast('Failed to delete document', 'error');
+    }
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

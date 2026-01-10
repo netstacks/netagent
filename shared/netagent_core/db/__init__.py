@@ -2,6 +2,7 @@
 
 from .database import engine, SessionLocal, Base, get_db, init_db, get_db_context
 from .models import (
+    AgentType,
     User,
     Agent,
     AgentTemplate,
@@ -16,6 +17,7 @@ from .models import (
     KnowledgeChunk,
     DeviceCredential,
     MCPServer,
+    APIResource,
     Approval,
     AuditLog,
     Settings,
@@ -33,6 +35,7 @@ __all__ = [
     "get_db",
     "init_db",
     "get_db_context",
+    "AgentType",
     "User",
     "Agent",
     "AgentTemplate",
@@ -47,6 +50,7 @@ __all__ = [
     "KnowledgeChunk",
     "DeviceCredential",
     "MCPServer",
+    "APIResource",
     "Approval",
     "AuditLog",
     "Settings",

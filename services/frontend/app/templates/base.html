@@ -34,42 +34,6 @@
                 </a>
             </li>
 
-            <li class="nav-section">Agents</li>
-            <li class="nav-item">
-                <a href="/agents" class="nav-link {% if active_page == 'agents' %}active{% endif %}">
-                    <i class="fas fa-robot"></i>
-                    <span>My Agents</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="/agents/new" class="nav-link {% if active_page == 'agent_create' %}active{% endif %}">
-                    <i class="fas fa-plus"></i>
-                    <span>Create Agent</span>
-                </a>
-            </li>
-
-            <li class="nav-section">Knowledge</li>
-            <li class="nav-item">
-                <a href="/knowledge" class="nav-link {% if active_page == 'knowledge' %}active{% endif %}">
-                    <i class="fas fa-book"></i>
-                    <span>Knowledge Bases</span>
-                </a>
-            </li>
-
-            <li class="nav-section">Configuration</li>
-            <li class="nav-item">
-                <a href="/devices" class="nav-link {% if active_page == 'devices' %}active{% endif %}">
-                    <i class="fas fa-server"></i>
-                    <span>Device Credentials</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="/mcp" class="nav-link {% if active_page == 'mcp' %}active{% endif %}">
-                    <i class="fas fa-plug"></i>
-                    <span>MCP Servers</span>
-                </a>
-            </li>
-
             <li class="nav-section">Operations</li>
             <li class="nav-item">
                 <a href="/jobs" class="nav-link {% if active_page == 'jobs' %}active{% endif %}">
@@ -105,11 +69,57 @@
                 </a>
             </li>
 
-            <li class="nav-section">Admin</li>
+            <li class="nav-section">Agents</li>
+            <li class="nav-item">
+                <a href="/agents" class="nav-link {% if active_page == 'agents' %}active{% endif %}">
+                    <i class="fas fa-robot"></i>
+                    <span>My Agents</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/agents/new" class="nav-link {% if active_page == 'agent_create' %}active{% endif %}">
+                    <i class="fas fa-plus"></i>
+                    <span>Create Agent</span>
+                </a>
+            </li>
+
+            <li class="nav-section">Tools</li>
+            <li class="nav-item">
+                <a href="/knowledge" class="nav-link {% if active_page == 'knowledge' %}active{% endif %}">
+                    <i class="fas fa-book"></i>
+                    <span>Knowledge Bases</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/mcp" class="nav-link {% if active_page == 'mcp' %}active{% endif %}">
+                    <i class="fas fa-plug"></i>
+                    <span>MCP Servers</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/api-resources" class="nav-link {% if active_page == 'api_resources' %}active{% endif %}">
+                    <i class="fas fa-cloud"></i>
+                    <span>API Resources</span>
+                </a>
+            </li>
+
+            <li class="nav-section">Settings</li>
             <li class="nav-item">
                 <a href="/settings" class="nav-link {% if active_page == 'settings' %}active{% endif %}">
                     <i class="fas fa-cog"></i>
-                    <span>Settings</span>
+                    <span>General</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/devices" class="nav-link {% if active_page == 'devices' %}active{% endif %}">
+                    <i class="fas fa-key"></i>
+                    <span>Device Credentials</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/settings/api-docs" class="nav-link {% if active_page == 'api_docs' %}active{% endif %}">
+                    <i class="fas fa-book-open"></i>
+                    <span>API Docs</span>
                 </a>
             </li>
         </ul>

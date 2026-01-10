@@ -40,7 +40,7 @@
         </a>
     </div>
     <div class="col-md-6 col-lg-3">
-        <a href="/sessions?status=active" class="text-decoration-none">
+        <a href="/live-sessions" class="text-decoration-none">
             <div class="stat-card clickable-stat">
                 <div class="stat-icon purple">
                     <i class="fas fa-play-circle"></i>
@@ -64,8 +64,8 @@
                     <a href="/agents/new" class="btn btn-primary">
                         <i class="fas fa-plus me-2"></i>Create New Agent
                     </a>
-                    <a href="/workflows/new" class="btn btn-outline-secondary">
-                        <i class="fas fa-diagram-project me-2"></i>Build Workflow
+                    <a href="/jobs/new" class="btn btn-outline-secondary">
+                        <i class="fas fa-tasks me-2"></i>Create Job
                     </a>
                     <a href="/knowledge" class="btn btn-outline-secondary">
                         <i class="fas fa-book me-2"></i>Add Knowledge Base
@@ -89,7 +89,7 @@
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="card-title mb-0">Recent Sessions</h5>
-                <a href="/sessions" class="btn btn-sm btn-outline-secondary">View All</a>
+                <a href="/live-sessions" class="btn btn-sm btn-outline-secondary">View All</a>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -142,7 +142,7 @@
 document.addEventListener('DOMContentLoaded', async function() {
     // Load dashboard stats
     try {
-        const stats = await apiClient.get('/api/stats/dashboard');
+        const stats = await api.get('/api/stats/dashboard');
         document.getElementById('stat-agents').textContent = stats.agents || 0;
         document.getElementById('stat-approvals').textContent = stats.pending_approvals || 0;
         document.getElementById('stat-knowledge').textContent = stats.knowledge_bases || 0;
@@ -152,7 +152,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Load active sessions count
     try {
-        const activeSessions = await apiClient.get('/api/chat/sessions?status=active&limit=1');
+        const activeSessions = await api.get('/api/chat/sessions?status=active&limit=1');
         document.getElementById('stat-active-sessions').textContent = activeSessions.total || 0;
     } catch (err) {
         console.error('Failed to load active sessions count:', err);
@@ -161,7 +161,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Load quick-access agents
     try {
-        const agents = await apiClient.get('/api/agents?enabled=true&limit=5');
+        const agents = await api.get('/api/agents?enabled=true&limit=5');
         const container = document.getElementById('quick-agents');
 
         if (agents.items && agents.items.length > 0) {
@@ -192,7 +192,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Load recent sessions
     try {
-        const sessions = await apiClient.get('/api/chat/sessions?limit=10');
+        const sessions = await api.get('/api/chat/sessions?limit=10');
         const tbody = document.getElementById('recent-sessions');
 
         if (sessions.items && sessions.items.length > 0) {
@@ -241,7 +241,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Load agent templates
     try {
-        const templates = await apiClient.get('/api/agents/templates');
+        const templates = await api.get('/api/agents/templates');
         const container = document.getElementById('agent-templates');
 
         if (templates.items && templates.items.length > 0) {

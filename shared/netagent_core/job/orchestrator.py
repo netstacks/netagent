@@ -360,6 +360,16 @@ class JobOrchestrator:
             "task_name": task.name,
         }
 
+        # Add delivery configuration from job settings (email, slack, webhook)
+        if self.job.delivery_config:
+            delivery = self.job.delivery_config
+            if delivery.get("email"):
+                context["email_recipients"] = delivery["email"]
+            if delivery.get("slack"):
+                context["slack_channels"] = delivery["slack"]
+            if delivery.get("webhook"):
+                context["webhook_urls"] = delivery["webhook"]
+
         # Add outputs from dependencies
         dep_outputs = self.graph.get_dependency_outputs(task.sequence)
         if dep_outputs:

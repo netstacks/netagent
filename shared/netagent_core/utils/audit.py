@@ -9,11 +9,11 @@ from typing import Optional, Any, Dict, TYPE_CHECKING
 from sqlalchemy.orm import Session
 
 from ..db.models import AuditLog
-from ..auth.alb_auth import ALBUser
 
-# Import Request only for type checking to avoid requiring fastapi in worker
+# Import Request and ALBUser only for type checking to avoid requiring fastapi in worker
 if TYPE_CHECKING:
     from fastapi import Request
+    from ..auth.alb_auth import ALBUser
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,12 @@ class AuditEventType(str, Enum):
     MCP_SERVER_DELETED = "mcp.server.deleted"
     MCP_TOOL_CALLED = "mcp.tool.called"
 
+    # API Resource events
+    API_RESOURCE_CREATED = "api_resource.created"
+    API_RESOURCE_UPDATED = "api_resource.updated"
+    API_RESOURCE_DELETED = "api_resource.deleted"
+    API_RESOURCE_CALLED = "api_resource.called"
+
     # Approval events
     APPROVAL_REQUESTED = "approval.requested"
     APPROVAL_GRANTED = "approval.granted"
@@ -79,7 +85,7 @@ class AuditEventType(str, Enum):
 def audit_log(
     db: Session,
     event_type: AuditEventType,
-    user: Optional[ALBUser] = None,
+    user: Optional["ALBUser"] = None,
     resource_type: Optional[str] = None,
     resource_id: Optional[int] = None,
     resource_name: Optional[str] = None,

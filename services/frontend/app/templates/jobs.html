@@ -14,6 +14,24 @@
         </a>
     </div>
 
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-4" id="jobsTabs" role="tablist">
+        <li class="nav-item">
+            <button class="nav-link active" id="jobs-tab" data-bs-toggle="tab" data-bs-target="#jobs-pane" type="button">
+                <i class="fas fa-tasks me-1"></i>Jobs
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" id="ephemeral-tab" data-bs-toggle="tab" data-bs-target="#ephemeral-pane" type="button" onclick="loadEphemeralAgents()">
+                <i class="fas fa-robot me-1"></i>Ephemeral Agents <span class="badge bg-secondary" id="ephemeral-count">-</span>
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+    <!-- Jobs Tab -->
+    <div class="tab-pane fade show active" id="jobs-pane" role="tabpanel">
+
     <!-- Filters -->
     <div class="card mb-4">
         <div class="card-body">
@@ -85,6 +103,69 @@
             </div>
         </div>
     </div>
+
+    </div><!-- End Jobs Tab Pane -->
+
+    <!-- Ephemeral Agents Tab -->
+    <div class="tab-pane fade" id="ephemeral-pane" role="tabpanel">
+        <!-- Ephemeral Agents Bulk Actions -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="row g-3 align-items-center">
+                    <div class="col-auto">
+                        <span class="text-muted">
+                            Auto-generated agents for job tasks. These can be safely deleted after jobs complete.
+                        </span>
+                    </div>
+                    <div class="col-auto ms-auto">
+                        <div id="ephemeral-bulk-actions" class="d-none">
+                            <span class="me-2 text-muted"><span id="ephemeral-selected-count">0</span> selected</span>
+                            <button onclick="bulkDeleteEphemeralAgents()" class="btn btn-outline-danger btn-sm" title="Delete selected agents">
+                                <i class="fas fa-trash me-1"></i>Delete Selected
+                            </button>
+                        </div>
+                        <button onclick="deleteAllEphemeralAgents()" class="btn btn-outline-warning btn-sm" id="delete-all-ephemeral" title="Delete all ephemeral agents">
+                            <i class="fas fa-broom me-1"></i>Delete All
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Ephemeral Agents Table -->
+        <div class="card">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" id="ephemeral-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" class="form-check-input" id="ephemeral-select-all" onchange="toggleEphemeralSelectAll(this)">
+                                </th>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Model</th>
+                                <th>Job</th>
+                                <th>Task</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ephemeral-tbody">
+                            <tr>
+                                <td colspan="8" class="text-center py-4 text-muted">
+                                    <i class="fas fa-robot fa-2x mb-2 d-block"></i>
+                                    Click the tab to load ephemeral agents
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div><!-- End Ephemeral Agents Tab Pane -->
+
+    </div><!-- End Tab Content -->
 </div>
 {% endblock %}
 
@@ -417,9 +498,244 @@ async function deleteJob(jobId) {
 }
 
 // Load jobs on page load
-document.addEventListener('DOMContentLoaded', loadJobs);
+document.addEventListener('DOMContentLoaded', function() {
+    loadJobs();
+    // Load ephemeral count on page load
+    loadEphemeralCount();
+});
 
 // Auto-refresh every 10 seconds (SSE endpoint not yet implemented)
 setInterval(loadJobs, 10000);
+
+
+// =============================================================================
+// Ephemeral Agents Functions
+// =============================================================================
+
+let ephemeralAgents = [];
+let selectedEphemeralAgents = new Set();
+let ephemeralLoaded = false;
+
+async function loadEphemeralCount() {
+    try {
+        const response = await fetch('/api/jobs/ephemeral-agents?limit=1');
+        if (response.ok) {
+            const data = await response.json();
+            document.getElementById('ephemeral-count').textContent = data.total;
+        }
+    } catch (error) {
+        console.error('Failed to load ephemeral count:', error);
+    }
+}
+
+async function loadEphemeralAgents() {
+    const tbody = document.getElementById('ephemeral-tbody');
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="8" class="text-center py-4">
+                <div class="spinner-border spinner-border-sm" role="status"></div>
+                <span class="ms-2">Loading ephemeral agents...</span>
+            </td>
+        </tr>
+    `;
+
+    try {
+        const response = await fetch('/api/jobs/ephemeral-agents?limit=100');
+        if (!response.ok) throw new Error('Failed to load ephemeral agents');
+        const data = await response.json();
+        ephemeralAgents = data.items || [];
+        document.getElementById('ephemeral-count').textContent = data.total;
+        renderEphemeralAgentsTable();
+        ephemeralLoaded = true;
+    } catch (error) {
+        console.error('Failed to load ephemeral agents:', error);
+        showToast('Failed to load ephemeral agents', 'error');
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" class="text-center py-4 text-danger">
+                    <i class="fas fa-exclamation-triangle fa-2x mb-2 d-block"></i>
+                    Failed to load ephemeral agents
+                </td>
+            </tr>
+        `;
+    }
+}
+
+function renderEphemeralAgentsTable() {
+    const tbody = document.getElementById('ephemeral-tbody');
+    selectedEphemeralAgents.clear();
+    updateEphemeralBulkActionsUI();
+
+    if (ephemeralAgents.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" class="text-center py-4 text-muted">
+                    <i class="fas fa-robot fa-2x mb-2 d-block"></i>
+                    No ephemeral agents found
+                </td>
+            </tr>
+        `;
+        document.getElementById('delete-all-ephemeral').classList.add('d-none');
+        return;
+    }
+
+    document.getElementById('delete-all-ephemeral').classList.remove('d-none');
+
+    tbody.innerHTML = ephemeralAgents.map(agent => `
+        <tr>
+            <td>
+                <input type="checkbox" class="form-check-input ephemeral-checkbox"
+                       data-agent-id="${agent.id}"
+                       onchange="toggleEphemeralSelection(${agent.id}, this.checked)">
+            </td>
+            <td><code>#${agent.id}</code></td>
+            <td>
+                <strong>${escapeHtml(agent.name)}</strong>
+                ${agent.description ? `<br><small class="text-muted">${escapeHtml(agent.description).substring(0, 50)}...</small>` : ''}
+            </td>
+            <td><code>${agent.model}</code></td>
+            <td>
+                ${agent.job_id ? `<a href="/jobs/${agent.job_id}" class="text-decoration-none">#${agent.job_id} ${escapeHtml(agent.job_name || '')}</a>` : '-'}
+            </td>
+            <td>${agent.task_name ? escapeHtml(agent.task_name) : '-'}</td>
+            <td>${formatDate(agent.created_at)}</td>
+            <td>
+                <button onclick="deleteEphemeralAgent(${agent.id})" class="btn btn-sm btn-outline-danger" title="Delete">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function toggleEphemeralSelectAll(checkbox) {
+    const checkboxes = document.querySelectorAll('.ephemeral-checkbox');
+    checkboxes.forEach(cb => {
+        cb.checked = checkbox.checked;
+        const agentId = parseInt(cb.dataset.agentId);
+        if (checkbox.checked) {
+            selectedEphemeralAgents.add(agentId);
+        } else {
+            selectedEphemeralAgents.delete(agentId);
+        }
+    });
+    updateEphemeralBulkActionsUI();
+}
+
+function toggleEphemeralSelection(agentId, isSelected) {
+    if (isSelected) {
+        selectedEphemeralAgents.add(agentId);
+    } else {
+        selectedEphemeralAgents.delete(agentId);
+    }
+    updateEphemeralBulkActionsUI();
+}
+
+function updateEphemeralBulkActionsUI() {
+    const bulkActions = document.getElementById('ephemeral-bulk-actions');
+    const selectedCount = document.getElementById('ephemeral-selected-count');
+
+    if (selectedEphemeralAgents.size > 0) {
+        bulkActions.classList.remove('d-none');
+        selectedCount.textContent = selectedEphemeralAgents.size;
+    } else {
+        bulkActions.classList.add('d-none');
+    }
+
+    // Update select-all checkbox state
+    const selectAll = document.getElementById('ephemeral-select-all');
+    const checkboxes = document.querySelectorAll('.ephemeral-checkbox');
+    if (checkboxes.length > 0) {
+        selectAll.checked = selectedEphemeralAgents.size === checkboxes.length;
+        selectAll.indeterminate = selectedEphemeralAgents.size > 0 && selectedEphemeralAgents.size < checkboxes.length;
+    }
+}
+
+async function deleteEphemeralAgent(agentId) {
+    if (!confirm('Delete this ephemeral agent? This action cannot be undone.')) return;
+
+    try {
+        const response = await fetch('/api/jobs/ephemeral-agents/bulk-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agent_ids: [agentId] })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to delete agent');
+        }
+
+        showToast('Agent deleted', 'success');
+        loadEphemeralAgents();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function bulkDeleteEphemeralAgents() {
+    if (selectedEphemeralAgents.size === 0) return;
+
+    if (!confirm(`Delete ${selectedEphemeralAgents.size} selected ephemeral agent(s)? This action cannot be undone.`)) return;
+
+    try {
+        const response = await fetch('/api/jobs/ephemeral-agents/bulk-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agent_ids: Array.from(selectedEphemeralAgents) })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to delete agents');
+        }
+
+        const result = await response.json();
+        if (result.success.length > 0) {
+            showToast(`Deleted ${result.success.length} agent(s)`, 'success');
+        }
+        if (result.failed.length > 0) {
+            showToast(`Failed to delete ${result.failed.length} agent(s)`, 'warning');
+        }
+
+        selectedEphemeralAgents.clear();
+        loadEphemeralAgents();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function deleteAllEphemeralAgents() {
+    if (ephemeralAgents.length === 0) return;
+
+    if (!confirm(`Delete ALL ${ephemeralAgents.length} ephemeral agent(s)? This action cannot be undone.`)) return;
+
+    const allIds = ephemeralAgents.map(a => a.id);
+
+    try {
+        const response = await fetch('/api/jobs/ephemeral-agents/bulk-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agent_ids: allIds })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to delete agents');
+        }
+
+        const result = await response.json();
+        if (result.success.length > 0) {
+            showToast(`Deleted ${result.success.length} agent(s)`, 'success');
+        }
+        if (result.failed.length > 0) {
+            showToast(`Failed to delete ${result.failed.length} agent(s)`, 'warning');
+        }
+
+        loadEphemeralAgents();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
 </script>
 {% endblock %}

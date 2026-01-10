@@ -1,0 +1,740 @@
+{% extends "base.html" %}
+
+{% block title %}API Resources - NetAgent{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">API Resources</h2>
+        <p class="text-muted mb-0">Define custom REST API endpoints that agents can call as tools</p>
+    </div>
+    <div>
+        <button class="btn btn-outline-secondary me-2" id="btn-refresh">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addResourceModal">
+            <i class="bi bi-plus-lg"></i> Add API Resource
+        </button>
+    </div>
+</div>
+
+<!-- API Resources Grid -->
+<div class="row g-4" id="resources-grid">
+    <!-- Resources will be loaded here -->
+</div>
+
+<!-- Empty State -->
+<div id="resources-empty" class="text-center py-5 d-none">
+    <i class="bi bi-cloud display-1 text-muted"></i>
+    <h4 class="mt-3">No API Resources</h4>
+    <p class="text-muted">Add an API resource to let agents call external REST APIs</p>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addResourceModal">
+        <i class="bi bi-plus-lg"></i> Add API Resource
+    </button>
+</div>
+
+<!-- Add/Edit Resource Modal -->
+<div class="modal fade" id="addResourceModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="resourceModalTitle">Add API Resource</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="resource-id">
+
+                <!-- Nav tabs -->
+                <ul class="nav nav-tabs mb-3" id="resourceTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="basic-tab" data-bs-toggle="tab" data-bs-target="#basic-panel" type="button" role="tab">Basic</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="auth-tab" data-bs-toggle="tab" data-bs-target="#auth-panel" type="button" role="tab">Authentication</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="request-tab" data-bs-toggle="tab" data-bs-target="#request-panel" type="button" role="tab">Request</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="response-tab" data-bs-toggle="tab" data-bs-target="#response-panel" type="button" role="tab">Response</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings-panel" type="button" role="tab">Settings</button>
+                    </li>
+                </ul>
+
+                <!-- Tab panels -->
+                <div class="tab-content">
+                    <!-- Basic Tab -->
+                    <div class="tab-pane fade show active" id="basic-panel" role="tabpanel">
+                        <div class="mb-3">
+                            <label class="form-label">Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="resource-name" required
+                                   placeholder="e.g., Weather API">
+                            <div class="form-text">This will become the tool name for agents (api_weather_api)</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Description / AI Context</label>
+                            <textarea class="form-control" id="resource-description" rows="3"
+                                      placeholder="Describe when and how this API should be used. This helps the AI understand when to call it."></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">URL <span class="text-danger">*</span></label>
+                            <input type="url" class="form-control" id="resource-url" required
+                                   placeholder="https://api.example.com/v1/data/{id}">
+                            <div class="form-text">Use {param} for URL path parameters</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">HTTP Method <span class="text-danger">*</span></label>
+                            <select class="form-select" id="resource-method">
+                                <option value="GET">GET</option>
+                                <option value="POST">POST</option>
+                                <option value="PUT">PUT</option>
+                                <option value="PATCH">PATCH</option>
+                                <option value="DELETE">DELETE</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Authentication Tab -->
+                    <div class="tab-pane fade" id="auth-panel" role="tabpanel">
+                        <div class="mb-3">
+                            <label class="form-label">Authentication Type</label>
+                            <select class="form-select" id="resource-auth-type">
+                                <option value="none">None</option>
+                                <option value="bearer">Bearer Token</option>
+                                <option value="basic">Basic Auth</option>
+                                <option value="api_key">API Key Header</option>
+                                <option value="custom_headers">Custom Headers</option>
+                            </select>
+                        </div>
+
+                        <!-- Bearer Token -->
+                        <div class="auth-fields" id="auth-bearer-fields" style="display: none;">
+                            <div class="mb-3">
+                                <label class="form-label">Bearer Token</label>
+                                <input type="password" class="form-control" id="auth-bearer-token"
+                                       placeholder="Enter bearer token">
+                            </div>
+                        </div>
+
+                        <!-- Basic Auth -->
+                        <div class="auth-fields" id="auth-basic-fields" style="display: none;">
+                            <div class="mb-3">
+                                <label class="form-label">Username</label>
+                                <input type="text" class="form-control" id="auth-basic-username"
+                                       placeholder="Username">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Password</label>
+                                <input type="password" class="form-control" id="auth-basic-password"
+                                       placeholder="Password">
+                            </div>
+                        </div>
+
+                        <!-- API Key -->
+                        <div class="auth-fields" id="auth-api-key-fields" style="display: none;">
+                            <div class="mb-3">
+                                <label class="form-label">Header Name</label>
+                                <input type="text" class="form-control" id="auth-api-key-name"
+                                       placeholder="X-API-Key" value="X-API-Key">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Header Value</label>
+                                <input type="password" class="form-control" id="auth-api-key-value"
+                                       placeholder="Enter API key">
+                            </div>
+                        </div>
+
+                        <!-- Custom Headers -->
+                        <div class="auth-fields" id="auth-custom-fields" style="display: none;">
+                            <div class="mb-3">
+                                <label class="form-label">Custom Headers (JSON)</label>
+                                <textarea class="form-control font-monospace" id="auth-custom-headers" rows="4"
+                                          placeholder='{"Authorization": "Custom value", "X-Custom-Header": "value"}'></textarea>
+                                <div class="form-text">JSON object with header name-value pairs</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Request Tab -->
+                    <div class="tab-pane fade" id="request-panel" role="tabpanel">
+                        <div class="mb-3">
+                            <label class="form-label">Static Headers (JSON)</label>
+                            <textarea class="form-control font-monospace" id="resource-headers" rows="3"
+                                      placeholder='{"Accept": "application/json"}'></textarea>
+                            <div class="form-text">Headers sent with every request (in addition to auth headers)</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">URL Parameters Schema (JSON Schema)</label>
+                            <textarea class="form-control font-monospace" id="resource-url-params" rows="4"
+                                      placeholder='{"type": "object", "properties": {"id": {"type": "string", "description": "Resource ID"}}, "required": ["id"]}'></textarea>
+                            <div class="form-text">Define {param} placeholders in the URL path</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Query Parameters Schema (JSON Schema)</label>
+                            <textarea class="form-control font-monospace" id="resource-query-params" rows="4"
+                                      placeholder='{"type": "object", "properties": {"limit": {"type": "integer", "description": "Max results"}}}'></textarea>
+                            <div class="form-text">Define ?query=params</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Request Body Schema (JSON Schema)</label>
+                            <textarea class="form-control font-monospace" id="resource-body-schema" rows="4"
+                                      placeholder='{"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}'></textarea>
+                            <div class="form-text">For POST/PUT/PATCH requests</div>
+                        </div>
+                    </div>
+
+                    <!-- Response Tab -->
+                    <div class="tab-pane fade" id="response-panel" role="tabpanel">
+                        <div class="mb-3">
+                            <label class="form-label">Response Format</label>
+                            <select class="form-select" id="resource-response-format">
+                                <option value="json">JSON</option>
+                                <option value="text">Plain Text</option>
+                                <option value="binary">Binary</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Response Path</label>
+                            <input type="text" class="form-control" id="resource-response-path"
+                                   placeholder="data.items">
+                            <div class="form-text">Extract specific data from JSON response (e.g., data.items)</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Success Status Codes</label>
+                            <input type="text" class="form-control" id="resource-success-codes"
+                                   placeholder="200, 201, 204" value="200, 201, 204">
+                            <div class="form-text">Comma-separated list of HTTP status codes that indicate success</div>
+                        </div>
+                    </div>
+
+                    <!-- Settings Tab -->
+                    <div class="tab-pane fade" id="settings-panel" role="tabpanel">
+                        <div class="mb-3">
+                            <label class="form-label">Risk Level</label>
+                            <select class="form-select" id="resource-risk-level">
+                                <option value="low">Low - Read-only operations</option>
+                                <option value="medium">Medium - May modify data</option>
+                                <option value="high">High - Sensitive operations</option>
+                                <option value="critical">Critical - Requires extra caution</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Timeout (seconds)</label>
+                            <input type="number" class="form-control" id="resource-timeout"
+                                   value="30" min="1" max="300">
+                        </div>
+
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="resource-requires-approval">
+                            <label class="form-check-label" for="resource-requires-approval">
+                                Require approval before calling this API
+                            </label>
+                        </div>
+
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="resource-enabled" checked>
+                            <label class="form-check-label" for="resource-enabled">Enabled</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-info" id="btn-test-resource">
+                    <i class="bi bi-play-circle me-1"></i>Test
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btn-save-resource">
+                    <i class="bi bi-check-lg me-1"></i>Save
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Test Results Modal -->
+<div class="modal fade" id="testResultsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Test Results</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="test-results">
+                <!-- Results will be loaded here -->
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let resources = [];
+let editingId = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadResources();
+
+    document.getElementById('btn-refresh').addEventListener('click', loadResources);
+    document.getElementById('btn-save-resource').addEventListener('click', saveResource);
+    document.getElementById('btn-test-resource').addEventListener('click', testResource);
+
+    // Auth type toggle
+    document.getElementById('resource-auth-type').addEventListener('change', function() {
+        updateAuthFields(this.value);
+    });
+
+    // Reset modal on open
+    document.getElementById('addResourceModal').addEventListener('show.bs.modal', function(e) {
+        if (!editingId) {
+            resetForm();
+            document.getElementById('resourceModalTitle').textContent = 'Add API Resource';
+        }
+    });
+
+    document.getElementById('addResourceModal').addEventListener('hidden.bs.modal', function() {
+        editingId = null;
+    });
+});
+
+function updateAuthFields(authType) {
+    // Hide all auth fields
+    document.querySelectorAll('.auth-fields').forEach(el => el.style.display = 'none');
+
+    // Show relevant fields
+    switch (authType) {
+        case 'bearer':
+            document.getElementById('auth-bearer-fields').style.display = 'block';
+            break;
+        case 'basic':
+            document.getElementById('auth-basic-fields').style.display = 'block';
+            break;
+        case 'api_key':
+            document.getElementById('auth-api-key-fields').style.display = 'block';
+            break;
+        case 'custom_headers':
+            document.getElementById('auth-custom-fields').style.display = 'block';
+            break;
+    }
+}
+
+async function loadResources() {
+    try {
+        const response = await api.get('/api/api-resources');
+        resources = response.items || response || [];
+        renderResources();
+    } catch (error) {
+        showToast('Failed to load API resources', 'error');
+    }
+}
+
+function renderResources() {
+    const grid = document.getElementById('resources-grid');
+    const empty = document.getElementById('resources-empty');
+
+    if (!resources || resources.length === 0) {
+        grid.innerHTML = '';
+        empty.classList.remove('d-none');
+        return;
+    }
+
+    empty.classList.add('d-none');
+    grid.innerHTML = resources.map(resource => {
+        const healthClass = getHealthClass(resource.health_status);
+        const methodClass = getMethodClass(resource.http_method);
+
+        return `
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-3">
+                            <div>
+                                <h5 class="card-title mb-1">${escapeHtml(resource.name)}</h5>
+                                <span class="badge bg-${methodClass}">${resource.http_method}</span>
+                                <span class="badge bg-${healthClass}">${resource.health_status || 'unknown'}</span>
+                                ${resource.enabled ? '' : '<span class="badge bg-secondary ms-1">Disabled</span>'}
+                            </div>
+                            <div class="dropdown">
+                                <button class="btn btn-link text-muted p-0" data-bs-toggle="dropdown">
+                                    <i class="bi bi-three-dots-vertical"></i>
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li><a class="dropdown-item" href="#" onclick="testExisting(${resource.id})"><i class="bi bi-play-circle me-2"></i>Test</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="checkHealth(${resource.id})"><i class="bi bi-heart-pulse me-2"></i>Health Check</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="editResource(${resource.id})"><i class="bi bi-pencil me-2"></i>Edit</a></li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li><a class="dropdown-item text-danger" href="#" onclick="deleteResource(${resource.id})"><i class="bi bi-trash me-2"></i>Delete</a></li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <p class="card-text text-muted small">${escapeHtml(resource.description || 'No description')}</p>
+
+                        <div class="mb-3">
+                            <small class="text-muted d-block text-truncate" title="${escapeHtml(resource.url)}">
+                                <i class="bi bi-link me-1"></i>${escapeHtml(resource.url)}
+                            </small>
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center pt-3 border-top">
+                            <div>
+                                <span class="badge bg-${getRiskClass(resource.risk_level)} me-1">${resource.risk_level}</span>
+                                ${resource.requires_approval ? '<span class="badge bg-warning">Approval</span>' : ''}
+                            </div>
+                            <span class="text-muted small">
+                                ${resource.last_tested_at ? formatTime(resource.last_tested_at) : 'Never tested'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function getHealthClass(status) {
+    switch (status) {
+        case 'healthy': return 'success';
+        case 'unhealthy': return 'danger';
+        default: return 'secondary';
+    }
+}
+
+function getMethodClass(method) {
+    switch (method) {
+        case 'GET': return 'primary';
+        case 'POST': return 'success';
+        case 'PUT': return 'warning';
+        case 'PATCH': return 'info';
+        case 'DELETE': return 'danger';
+        default: return 'secondary';
+    }
+}
+
+function getRiskClass(level) {
+    switch (level) {
+        case 'low': return 'success';
+        case 'medium': return 'warning';
+        case 'high': return 'danger';
+        case 'critical': return 'dark';
+        default: return 'secondary';
+    }
+}
+
+function formatTime(timestamp) {
+    if (!timestamp) return 'Never';
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = now - date;
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+    return date.toLocaleDateString();
+}
+
+function resetForm() {
+    document.getElementById('resource-id').value = '';
+    document.getElementById('resource-name').value = '';
+    document.getElementById('resource-description').value = '';
+    document.getElementById('resource-url').value = '';
+    document.getElementById('resource-method').value = 'GET';
+    document.getElementById('resource-auth-type').value = 'none';
+    document.getElementById('auth-bearer-token').value = '';
+    document.getElementById('auth-basic-username').value = '';
+    document.getElementById('auth-basic-password').value = '';
+    document.getElementById('auth-api-key-name').value = 'X-API-Key';
+    document.getElementById('auth-api-key-value').value = '';
+    document.getElementById('auth-custom-headers').value = '';
+    document.getElementById('resource-headers').value = '';
+    document.getElementById('resource-url-params').value = '';
+    document.getElementById('resource-query-params').value = '';
+    document.getElementById('resource-body-schema').value = '';
+    document.getElementById('resource-response-format').value = 'json';
+    document.getElementById('resource-response-path').value = '';
+    document.getElementById('resource-success-codes').value = '200, 201, 204';
+    document.getElementById('resource-risk-level').value = 'low';
+    document.getElementById('resource-timeout').value = '30';
+    document.getElementById('resource-requires-approval').checked = false;
+    document.getElementById('resource-enabled').checked = true;
+    updateAuthFields('none');
+
+    // Reset to first tab
+    const firstTab = document.querySelector('#resourceTabs .nav-link');
+    if (firstTab) {
+        new bootstrap.Tab(firstTab).show();
+    }
+}
+
+function editResource(id) {
+    const resource = resources.find(r => r.id === id);
+    if (!resource) return;
+
+    editingId = id;
+    document.getElementById('resourceModalTitle').textContent = 'Edit API Resource';
+    document.getElementById('resource-id').value = id;
+    document.getElementById('resource-name').value = resource.name;
+    document.getElementById('resource-description').value = resource.description || '';
+    document.getElementById('resource-url').value = resource.url;
+    document.getElementById('resource-method').value = resource.http_method;
+    document.getElementById('resource-auth-type').value = resource.auth_type || 'none';
+
+    // Clear auth fields - don't populate encrypted values
+    document.getElementById('auth-bearer-token').value = '';
+    document.getElementById('auth-basic-username').value = '';
+    document.getElementById('auth-basic-password').value = '';
+    document.getElementById('auth-api-key-name').value = 'X-API-Key';
+    document.getElementById('auth-api-key-value').value = '';
+    document.getElementById('auth-custom-headers').value = '';
+
+    document.getElementById('resource-headers').value = resource.request_headers ? JSON.stringify(resource.request_headers, null, 2) : '';
+    document.getElementById('resource-url-params').value = resource.url_params_schema ? JSON.stringify(resource.url_params_schema, null, 2) : '';
+    document.getElementById('resource-query-params').value = resource.query_params_schema ? JSON.stringify(resource.query_params_schema, null, 2) : '';
+    document.getElementById('resource-body-schema').value = resource.request_body_schema ? JSON.stringify(resource.request_body_schema, null, 2) : '';
+    document.getElementById('resource-response-format').value = resource.response_format || 'json';
+    document.getElementById('resource-response-path').value = resource.response_path || '';
+    document.getElementById('resource-success-codes').value = (resource.success_codes || [200, 201, 204]).join(', ');
+    document.getElementById('resource-risk-level').value = resource.risk_level || 'low';
+    document.getElementById('resource-timeout').value = resource.timeout_seconds || 30;
+    document.getElementById('resource-requires-approval').checked = resource.requires_approval || false;
+    document.getElementById('resource-enabled').checked = resource.enabled !== false;
+
+    updateAuthFields(resource.auth_type || 'none');
+
+    new bootstrap.Modal(document.getElementById('addResourceModal')).show();
+}
+
+function getFormData() {
+    const data = {
+        name: document.getElementById('resource-name').value,
+        description: document.getElementById('resource-description').value,
+        url: document.getElementById('resource-url').value,
+        http_method: document.getElementById('resource-method').value,
+        auth_type: document.getElementById('resource-auth-type').value,
+        response_format: document.getElementById('resource-response-format').value,
+        response_path: document.getElementById('resource-response-path').value || null,
+        risk_level: document.getElementById('resource-risk-level').value,
+        timeout_seconds: parseInt(document.getElementById('resource-timeout').value) || 30,
+        requires_approval: document.getElementById('resource-requires-approval').checked,
+        enabled: document.getElementById('resource-enabled').checked
+    };
+
+    // Parse success codes
+    const successCodesStr = document.getElementById('resource-success-codes').value;
+    if (successCodesStr) {
+        data.success_codes = successCodesStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    }
+
+    // Parse JSON fields
+    const parseJsonField = (id) => {
+        const value = document.getElementById(id).value.trim();
+        if (!value) return null;
+        try {
+            return JSON.parse(value);
+        } catch (e) {
+            throw new Error(`Invalid JSON in ${id}: ${e.message}`);
+        }
+    };
+
+    try {
+        data.request_headers = parseJsonField('resource-headers');
+        data.url_params_schema = parseJsonField('resource-url-params');
+        data.query_params_schema = parseJsonField('resource-query-params');
+        data.request_body_schema = parseJsonField('resource-body-schema');
+    } catch (e) {
+        showToast(e.message, 'error');
+        return null;
+    }
+
+    // Build auth config based on type
+    const authType = data.auth_type;
+    if (authType && authType !== 'none') {
+        const authConfig = {};
+
+        switch (authType) {
+            case 'bearer':
+                const token = document.getElementById('auth-bearer-token').value;
+                if (token) authConfig.token = token;
+                break;
+            case 'basic':
+                const username = document.getElementById('auth-basic-username').value;
+                const password = document.getElementById('auth-basic-password').value;
+                if (username) {
+                    authConfig.username = username;
+                    authConfig.password = password;
+                }
+                break;
+            case 'api_key':
+                const headerName = document.getElementById('auth-api-key-name').value;
+                const headerValue = document.getElementById('auth-api-key-value').value;
+                if (headerValue) {
+                    authConfig.header_name = headerName;
+                    authConfig.header_value = headerValue;
+                }
+                break;
+            case 'custom_headers':
+                const customHeaders = document.getElementById('auth-custom-headers').value.trim();
+                if (customHeaders) {
+                    try {
+                        authConfig.headers = JSON.parse(customHeaders);
+                    } catch (e) {
+                        showToast('Invalid JSON in custom headers', 'error');
+                        return null;
+                    }
+                }
+                break;
+        }
+
+        if (Object.keys(authConfig).length > 0) {
+            data.auth_config = authConfig;
+        }
+    }
+
+    return data;
+}
+
+async function saveResource() {
+    const id = document.getElementById('resource-id').value;
+    const data = getFormData();
+    if (!data) return;
+
+    try {
+        if (id) {
+            await api.put(`/api/api-resources/${id}`, data);
+            showToast('API resource updated', 'success');
+        } else {
+            await api.post('/api/api-resources', data);
+            showToast('API resource created', 'success');
+        }
+
+        bootstrap.Modal.getInstance(document.getElementById('addResourceModal')).hide();
+        loadResources();
+    } catch (error) {
+        showToast('Failed to save API resource: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function testResource() {
+    const data = getFormData();
+    if (!data) return;
+
+    const testData = {
+        url: data.url,
+        http_method: data.http_method,
+        auth_type: data.auth_type,
+        auth_config: data.auth_config,
+        request_headers: data.request_headers,
+        timeout_seconds: data.timeout_seconds
+    };
+
+    try {
+        showToast('Testing API...', 'info');
+        const result = await api.post('/api/api-resources/test', testData);
+        showTestResults(result);
+    } catch (error) {
+        showTestResults({
+            status: 'error',
+            error: error.message || 'Request failed'
+        });
+    }
+}
+
+async function testExisting(id) {
+    try {
+        showToast('Testing API...', 'info');
+        const result = await api.post(`/api/api-resources/${id}/test`, {});
+        showTestResults(result);
+        loadResources(); // Refresh to show updated health status
+    } catch (error) {
+        showTestResults({
+            status: 'error',
+            error: error.message || 'Request failed'
+        });
+    }
+}
+
+async function checkHealth(id) {
+    try {
+        const result = await api.post(`/api/api-resources/${id}/health`);
+        if (result.healthy) {
+            showToast('API is healthy', 'success');
+        } else {
+            showToast(`API unhealthy: ${result.error || 'Unknown error'}`, 'warning');
+        }
+        loadResources();
+    } catch (error) {
+        showToast('Health check failed', 'error');
+    }
+}
+
+function showTestResults(result) {
+    const container = document.getElementById('test-results');
+    const statusClass = result.status === 'success' ? 'success' : 'danger';
+
+    let bodyContent = '';
+    if (result.body) {
+        if (typeof result.body === 'object') {
+            bodyContent = JSON.stringify(result.body, null, 2);
+        } else {
+            bodyContent = result.body;
+        }
+    }
+
+    container.innerHTML = `
+        <div class="alert alert-${statusClass}">
+            <strong>Status:</strong> ${result.status}
+            ${result.status_code ? `<span class="ms-3">HTTP ${result.status_code}</span>` : ''}
+            ${result.elapsed_ms ? `<span class="ms-3">${result.elapsed_ms}ms</span>` : ''}
+        </div>
+
+        ${result.error ? `
+            <div class="alert alert-danger">
+                <strong>Error:</strong> ${escapeHtml(result.error)}
+            </div>
+        ` : ''}
+
+        ${result.headers ? `
+            <div class="mb-3">
+                <h6>Response Headers</h6>
+                <pre class="bg-dark text-light p-2 rounded small" style="max-height: 150px; overflow-y: auto;"><code>${escapeHtml(JSON.stringify(result.headers, null, 2))}</code></pre>
+            </div>
+        ` : ''}
+
+        ${bodyContent ? `
+            <div class="mb-3">
+                <h6>Response Body</h6>
+                <pre class="bg-dark text-light p-2 rounded" style="max-height: 300px; overflow-y: auto;"><code>${escapeHtml(bodyContent)}</code></pre>
+            </div>
+        ` : ''}
+    `;
+
+    new bootstrap.Modal(document.getElementById('testResultsModal')).show();
+}
+
+async function deleteResource(id) {
+    if (!confirm('Are you sure you want to delete this API resource?')) return;
+
+    try {
+        await api.delete(`/api/api-resources/${id}`);
+        showToast('API resource deleted', 'success');
+        loadResources();
+    } catch (error) {
+        showToast('Failed to delete API resource', 'error');
+    }
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

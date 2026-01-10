@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block title %}API Documentation - NetAgent{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">API Documentation</h2>
+        <p class="text-muted mb-0">Interactive documentation for the NetAgent REST API</p>
+    </div>
+    <div class="btn-group">
+        <button class="btn btn-outline-primary active" id="btn-swagger" onclick="showSwagger()">
+            <i class="bi bi-braces me-1"></i>Swagger UI
+        </button>
+        <button class="btn btn-outline-primary" id="btn-redoc" onclick="showRedoc()">
+            <i class="bi bi-file-text me-1"></i>ReDoc
+        </button>
+        <a href="/api/openapi.json" class="btn btn-outline-secondary" target="_blank">
+            <i class="bi bi-download me-1"></i>OpenAPI JSON
+        </a>
+    </div>
+</div>
+
+<!-- Quick Links -->
+<div class="card mb-4">
+    <div class="card-body py-3">
+        <div class="row align-items-center">
+            <div class="col-md-8">
+                <h6 class="mb-1"><i class="bi bi-lightning me-2"></i>Quick Links</h6>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <a href="#" onclick="scrollToTag('Agents')" class="badge bg-primary text-decoration-none">Agents</a>
+                    <a href="#" onclick="scrollToTag('Chat')" class="badge bg-success text-decoration-none">Chat</a>
+                    <a href="#" onclick="scrollToTag('Knowledge')" class="badge bg-info text-decoration-none">Knowledge</a>
+                    <a href="#" onclick="scrollToTag('MCP')" class="badge bg-warning text-decoration-none">MCP</a>
+                    <a href="#" onclick="scrollToTag('API Resources')" class="badge bg-secondary text-decoration-none">API Resources</a>
+                    <a href="#" onclick="scrollToTag('Jobs')" class="badge bg-dark text-decoration-none">Jobs</a>
+                    <a href="#" onclick="scrollToTag('Triggers')" class="badge bg-danger text-decoration-none">Triggers</a>
+                    <a href="#" onclick="scrollToTag('Users')" class="badge bg-primary text-decoration-none">Users</a>
+                    <a href="#" onclick="scrollToTag('Settings')" class="badge bg-secondary text-decoration-none">Settings</a>
+                </div>
+            </div>
+            <div class="col-md-4 text-end">
+                <small class="text-muted">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Base URL: <code>/api/</code>
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Swagger UI Container -->
+<div id="swagger-container" class="card">
+    <div class="card-body p-0">
+        <iframe id="swagger-frame" src="/api/docs" style="width: 100%; height: calc(100vh - 350px); min-height: 600px; border: none;"></iframe>
+    </div>
+</div>
+
+<!-- ReDoc Container (hidden by default) -->
+<div id="redoc-container" class="card d-none">
+    <div class="card-body p-0">
+        <iframe id="redoc-frame" src="" style="width: 100%; height: calc(100vh - 350px); min-height: 600px; border: none;"></iframe>
+    </div>
+</div>
+
+<!-- API Usage Examples -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-code-square me-2"></i>Quick Examples</h5>
+    </div>
+    <div class="card-body">
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item">
+                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#ex-curl">cURL</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#ex-python">Python</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#ex-js">JavaScript</button>
+            </li>
+        </ul>
+        <div class="tab-content mt-3">
+            <div class="tab-pane fade show active" id="ex-curl">
+                <pre class="bg-dark text-light p-3 rounded"><code># List all agents
+curl -X GET "{{ request.url.scheme }}://{{ request.url.netloc }}/api/agents" \
+  -H "Content-Type: application/json"
+
+# Create a chat session
+curl -X POST "{{ request.url.scheme }}://{{ request.url.netloc }}/api/chat/sessions" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": 1}'
+
+# Send a message
+curl -X POST "{{ request.url.scheme }}://{{ request.url.netloc }}/api/chat/sessions/{session_id}/messages" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Hello, agent!"}'</code></pre>
+            </div>
+            <div class="tab-pane fade" id="ex-python">
+                <pre class="bg-dark text-light p-3 rounded"><code>import requests
+
+BASE_URL = "{{ request.url.scheme }}://{{ request.url.netloc }}/api"
+
+# List all agents
+response = requests.get(f"{BASE_URL}/agents")
+agents = response.json()
+
+# Create a chat session
+session = requests.post(f"{BASE_URL}/chat/sessions", json={
+    "agent_id": 1
+}).json()
+
+# Send a message
+message = requests.post(
+    f"{BASE_URL}/chat/sessions/{session['id']}/messages",
+    json={"content": "Hello, agent!"}
+).json()</code></pre>
+            </div>
+            <div class="tab-pane fade" id="ex-js">
+                <pre class="bg-dark text-light p-3 rounded"><code>const BASE_URL = '{{ request.url.scheme }}://{{ request.url.netloc }}/api';
+
+// List all agents
+const agents = await fetch(`${BASE_URL}/agents`)
+  .then(r => r.json());
+
+// Create a chat session
+const session = await fetch(`${BASE_URL}/chat/sessions`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ agent_id: 1 })
+}).then(r => r.json());
+
+// Send a message (streaming)
+const response = await fetch(`${BASE_URL}/chat/sessions/${session.id}/messages/stream`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ content: 'Hello, agent!' })
+});</code></pre>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentView = 'swagger';
+
+function showSwagger() {
+    document.getElementById('swagger-container').classList.remove('d-none');
+    document.getElementById('redoc-container').classList.add('d-none');
+    document.getElementById('btn-swagger').classList.add('active');
+    document.getElementById('btn-redoc').classList.remove('active');
+    currentView = 'swagger';
+}
+
+function showRedoc() {
+    document.getElementById('swagger-container').classList.add('d-none');
+    document.getElementById('redoc-container').classList.remove('d-none');
+    document.getElementById('btn-swagger').classList.remove('active');
+    document.getElementById('btn-redoc').classList.add('active');
+
+    // Lazy load ReDoc
+    const redocFrame = document.getElementById('redoc-frame');
+    if (!redocFrame.src || redocFrame.src === '') {
+        redocFrame.src = '/api/redoc';
+    }
+    currentView = 'redoc';
+}
+
+function scrollToTag(tagName) {
+    // For Swagger UI, we can try to scroll to the tag section
+    const frame = document.getElementById('swagger-frame');
+    if (frame && frame.contentWindow) {
+        // Try to find and click the tag in Swagger UI
+        try {
+            const tagElement = frame.contentWindow.document.querySelector(`[data-tag="${tagName}"]`);
+            if (tagElement) {
+                tagElement.scrollIntoView({ behavior: 'smooth' });
+                tagElement.click();
+            }
+        } catch (e) {
+            // Cross-origin restrictions may prevent this
+            console.log('Cannot access iframe content due to cross-origin restrictions');
+        }
+    }
+}
+</script>
+{% endblock %}

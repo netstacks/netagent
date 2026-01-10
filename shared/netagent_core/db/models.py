@@ -20,6 +20,23 @@ from pgvector.sqlalchemy import Vector
 from .database import Base
 
 
+class AgentType(Base):
+    """Configurable agent types with icons, colors, and default system prompts."""
+
+    __tablename__ = "agent_types"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), unique=True, nullable=False, index=True)
+    display_name = Column(String(100), nullable=False)
+    description = Column(Text)
+    system_prompt = Column(Text)  # Default system prompt for agents of this type
+    icon = Column(String(50), default="bi-robot")  # Bootstrap icon class
+    color = Column(String(20), default="primary")  # Bootstrap color name
+    is_system = Column(Boolean, default=False)  # True for built-in types
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class User(Base):
     """User accounts (populated from AWS ALB OIDC headers)."""
 
@@ -63,6 +80,7 @@ class Agent(Base):
     allowed_device_patterns = Column(JSONB, default=lambda: ["*"])
     mcp_server_ids = Column(JSONB, default=list)
     knowledge_base_ids = Column(JSONB, default=list)
+    api_resource_ids = Column(JSONB, default=list)  # Custom REST API endpoints
     # If set, restricts which agents this agent can hand off to (None = all enabled agents)
     allowed_handoff_agent_ids = Column(JSONB)
 
@@ -82,6 +100,7 @@ class Agent(Base):
     # Ephemeral agent tracking (for auto-generated agents in jobs)
     is_ephemeral = Column(Boolean, default=False)
     created_for_job_id = Column(Integer, ForeignKey("jobs.id"))
+    created_for_task_name = Column(String(255))
 
     # Relationships
     creator = relationship("User", back_populates="agents")
@@ -408,6 +427,54 @@ class MCPServer(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class APIResource(Base):
+    """Custom REST API endpoints that agents can call as tools.
+
+    API Resources allow users to define external REST APIs that agents can invoke,
+    similar to MCP servers but with direct HTTP calls without protocol overhead.
+    """
+
+    __tablename__ = "api_resources"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)  # AI context for when/how to use this API
+
+    # Endpoint configuration
+    url = Column(String(500), nullable=False)  # Supports {param} templates
+    http_method = Column(String(10), nullable=False)  # GET, POST, PUT, DELETE, PATCH
+
+    # Authentication (encrypted)
+    auth_type = Column(String(30))  # none, bearer, basic, api_key, custom_headers
+    auth_config_encrypted = Column(LargeBinary)
+
+    # Request configuration
+    request_headers = Column(JSONB, default=dict)  # Static headers to include
+    request_body_schema = Column(JSONB)  # JSON Schema for POST/PUT body
+    query_params_schema = Column(JSONB)  # JSON Schema for query parameters
+    url_params_schema = Column(JSONB)  # JSON Schema for {path} parameters
+
+    # Response configuration
+    response_format = Column(String(20), default="json")  # json, text, binary
+    response_path = Column(String(255))  # JSONPath to extract specific data
+    success_codes = Column(JSONB, default=lambda: [200, 201, 204])
+
+    # Tool settings
+    risk_level = Column(String(20), default="low")  # low, medium, high, critical
+    requires_approval = Column(Boolean, default=False)
+    timeout_seconds = Column(Integer, default=30)
+
+    # Status tracking
+    health_status = Column(String(20), default="unknown")  # unknown, healthy, unhealthy
+    last_tested_at = Column(DateTime)
+    enabled = Column(Boolean, default=True)
+
+    # Ownership
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Approval(Base):
     """Pending approval requests for risky actions."""
 
@@ -578,7 +645,7 @@ class Job(Base):
     completed_at = Column(DateTime)
 
     # Relationships
-    tasks = relationship("JobTask", back_populates="job", cascade="all, delete-orphan")
+    tasks = relationship("JobTask", back_populates="job", cascade="all, delete-orphan", order_by="JobTask.sequence")
     creator = relationship("User")
     orchestrator_session = relationship("AgentSession", foreign_keys=[orchestrator_session_id])
     approvals = relationship("Approval", back_populates="job")

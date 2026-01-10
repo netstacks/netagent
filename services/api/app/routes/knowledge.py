@@ -251,7 +251,10 @@ async def list_documents(
                 "id": d.id,
                 "source_id": d.source_id,
                 "source_url": d.source_url,
+                "source": d.source_url or d.source_id,  # For frontend display
                 "title": d.title,
+                "chunk_count": len(d.chunks) if d.chunks else 0,
+                "indexed_at": d.last_synced_at.isoformat() if d.last_synced_at else None,
                 "last_synced_at": d.last_synced_at.isoformat() if d.last_synced_at else None,
             }
             for d in docs

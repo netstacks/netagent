@@ -7,17 +7,52 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from netagent_core.db import get_db, Agent, AgentTemplate
+from netagent_core.db import get_db, Agent, AgentTemplate, AgentType
 from netagent_core.auth import get_current_user, ALBUser
 from netagent_core.utils import audit_log, AuditEventType
 
 router = APIRouter()
 
-# REMOVED: All agents get all tools enabled by default
-# ALL_TOOLS = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email']
+
+# =============================================================================
+# Agent Type Pydantic Models
+# =============================================================================
+
+class AgentTypeCreate(BaseModel):
+    name: str
+    display_name: str
+    description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    icon: str = "bi-robot"
+    color: str = "primary"
 
 
-# Pydantic models
+class AgentTypeUpdate(BaseModel):
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    icon: Optional[str] = None
+    color: Optional[str] = None
+
+
+class AgentTypeResponse(BaseModel):
+    id: int
+    name: str
+    display_name: str
+    description: Optional[str]
+    system_prompt: Optional[str]
+    icon: str
+    color: str
+    is_system: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# =============================================================================
+# Agent Pydantic Models
+# =============================================================================
 class AgentCreate(BaseModel):
     name: str
     description: Optional[str] = None
@@ -32,6 +67,7 @@ class AgentCreate(BaseModel):
     allowed_device_patterns: List[str] = ["*"]
     mcp_server_ids: List[int] = []
     knowledge_base_ids: List[int] = []
+    api_resource_ids: List[int] = []
     allowed_handoff_agent_ids: Optional[List[int]] = None
     enabled: bool = True
 
@@ -49,6 +85,7 @@ class AgentUpdate(BaseModel):
     allowed_device_patterns: Optional[List[str]] = None
     mcp_server_ids: Optional[List[int]] = None
     knowledge_base_ids: Optional[List[int]] = None
+    api_resource_ids: Optional[List[int]] = None
     allowed_handoff_agent_ids: Optional[List[int]] = None
     enabled: Optional[bool] = None
 
@@ -68,6 +105,7 @@ class AgentResponse(BaseModel):
     allowed_device_patterns: List[str]
     mcp_server_ids: List[int]
     knowledge_base_ids: List[int]
+    api_resource_ids: List[int]
     allowed_handoff_agent_ids: Optional[List[int]]
     enabled: bool
     created_by: Optional[int]
@@ -103,6 +141,108 @@ class AgentTemplateResponse(BaseModel):
         from_attributes = True
 
 
+# =============================================================================
+# Agent Type Routes - MUST come before /{agent_id} routes
+# =============================================================================
+
+@router.get("/types", response_model=dict)
+async def list_agent_types(
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """List all agent types."""
+    types = db.query(AgentType).order_by(AgentType.name).all()
+    return {
+        "items": [AgentTypeResponse.model_validate(t) for t in types],
+        "total": len(types),
+    }
+
+
+@router.post("/types", response_model=AgentTypeResponse)
+async def create_agent_type(
+    data: AgentTypeCreate,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Create a new agent type."""
+    # Check for duplicate name
+    existing = db.query(AgentType).filter(AgentType.name == data.name).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Agent type '{data.name}' already exists")
+
+    agent_type = AgentType(
+        name=data.name,
+        display_name=data.display_name,
+        description=data.description,
+        system_prompt=data.system_prompt,
+        icon=data.icon,
+        color=data.color,
+        is_system=False,
+    )
+
+    db.add(agent_type)
+    db.commit()
+    db.refresh(agent_type)
+
+    return AgentTypeResponse.model_validate(agent_type)
+
+
+@router.put("/types/{type_id}", response_model=AgentTypeResponse)
+async def update_agent_type(
+    type_id: int,
+    data: AgentTypeUpdate,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Update an agent type."""
+    agent_type = db.query(AgentType).filter(AgentType.id == type_id).first()
+    if not agent_type:
+        raise HTTPException(status_code=404, detail="Agent type not found")
+
+    # Update fields
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(agent_type, key, value)
+
+    agent_type.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(agent_type)
+
+    return AgentTypeResponse.model_validate(agent_type)
+
+
+@router.delete("/types/{type_id}")
+async def delete_agent_type(
+    type_id: int,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Delete an agent type (only non-system types can be deleted)."""
+    agent_type = db.query(AgentType).filter(AgentType.id == type_id).first()
+    if not agent_type:
+        raise HTTPException(status_code=404, detail="Agent type not found")
+
+    if agent_type.is_system:
+        raise HTTPException(status_code=400, detail="System agent types cannot be deleted")
+
+    # Check if any agents use this type
+    agents_using = db.query(Agent).filter(Agent.agent_type == agent_type.name).count()
+    if agents_using > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete type '{agent_type.name}' - {agents_using} agent(s) are using it"
+        )
+
+    db.delete(agent_type)
+    db.commit()
+
+    return {"message": "Agent type deleted"}
+
+
+# =============================================================================
+# Agent Routes
+# =============================================================================
+
 @router.get("", response_model=dict)
 async def list_agents(
     db: Session = Depends(get_db),
@@ -112,8 +252,11 @@ async def list_agents(
     limit: int = Query(default=50, le=100),
     offset: int = 0,
 ):
-    """List all agents."""
-    query = db.query(Agent).filter(Agent.is_template == False)
+    """List all manually created agents (excludes ephemeral job agents)."""
+    query = db.query(Agent).filter(
+        Agent.is_template == False,
+        Agent.is_ephemeral == False,  # Exclude ephemeral agents
+    )
 
     if enabled is not None:
         query = query.filter(Agent.enabled == enabled)
@@ -195,7 +338,7 @@ async def create_agent(
     Note: Empty mcp_server_ids and knowledge_base_ids mean "use ALL available".
     This ensures agents automatically get access to new resources when added.
     """
-    # Use explicitly provided tools, knowledge bases, and MCP servers
+    # Use explicitly provided tools, knowledge bases, MCP servers, and API resources
     agent = Agent(
         name=data.name,
         description=data.description,
@@ -210,6 +353,7 @@ async def create_agent(
         allowed_device_patterns=data.allowed_device_patterns,
         mcp_server_ids=data.mcp_server_ids,  # Use provided MCP servers
         knowledge_base_ids=data.knowledge_base_ids,  # Use provided knowledge bases
+        api_resource_ids=data.api_resource_ids,  # Use provided API resources
         allowed_handoff_agent_ids=data.allowed_handoff_agent_ids,
         enabled=data.enabled,
         created_by=user.id,
@@ -281,11 +425,22 @@ async def delete_agent(
     user: ALBUser = Depends(get_current_user),
 ):
     """Delete an agent."""
+    from netagent_core.db import JobTask
+
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
     agent_name = agent.name
+
+    # Clear references from job_tasks before deleting
+    db.query(JobTask).filter(JobTask.agent_id == agent_id).update(
+        {"agent_id": None}, synchronize_session=False
+    )
+    db.query(JobTask).filter(JobTask.ephemeral_agent_id == agent_id).update(
+        {"ephemeral_agent_id": None}, synchronize_session=False
+    )
+
     db.delete(agent)
     db.commit()
 
@@ -331,6 +486,7 @@ async def duplicate_agent(
         allowed_device_patterns=agent.allowed_device_patterns,
         mcp_server_ids=agent.mcp_server_ids,  # Copy original MCP servers
         knowledge_base_ids=agent.knowledge_base_ids,  # Copy original knowledge bases
+        api_resource_ids=agent.api_resource_ids,  # Copy original API resources
         allowed_handoff_agent_ids=agent.allowed_handoff_agent_ids,
         enabled=False,
         created_by=user.id,

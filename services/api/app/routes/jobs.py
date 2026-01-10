@@ -455,10 +455,28 @@ async def bulk_delete_jobs(
             ]
 
             if ephemeral_agent_ids:
-                # Delete sessions for these agents first (FK constraint)
-                db.query(AgentSession).filter(
-                    AgentSession.agent_id.in_(ephemeral_agent_ids)
-                ).delete(synchronize_session=False)
+                # Get session IDs for these agents
+                session_ids = [
+                    session_id for (session_id,) in db.query(AgentSession.id).filter(
+                        AgentSession.agent_id.in_(ephemeral_agent_ids)
+                    ).all()
+                ]
+
+                if session_ids:
+                    # Clear session_id references in job_tasks first (FK constraint)
+                    db.query(JobTask).filter(
+                        JobTask.session_id.in_(session_ids)
+                    ).update({JobTask.session_id: None}, synchronize_session=False)
+
+                    # Delete sessions for these agents
+                    db.query(AgentSession).filter(
+                        AgentSession.id.in_(session_ids)
+                    ).delete(synchronize_session=False)
+
+                # Clear ephemeral_agent_id references in job_tasks (FK constraint)
+                db.query(JobTask).filter(
+                    JobTask.ephemeral_agent_id.in_(ephemeral_agent_ids)
+                ).update({JobTask.ephemeral_agent_id: None}, synchronize_session=False)
 
                 # Delete ephemeral agents
                 db.query(Agent).filter(
@@ -513,7 +531,141 @@ async def bulk_cancel_jobs(
 
 
 # =============================================================================
-# Individual Job Routes (MUST come after /bulk/* routes)
+# Ephemeral Agents - MUST be defined BEFORE {job_id} routes to avoid conflicts
+# =============================================================================
+
+class BulkAgentsRequest(BaseModel):
+    """Request for bulk agent operations."""
+    agent_ids: List[int] = Field(..., description="List of agent IDs to operate on")
+
+
+@router.get("/ephemeral-agents", response_model=dict)
+async def list_ephemeral_agents(
+    job_id: Optional[int] = Query(default=None, description="Filter by job ID"),
+    limit: int = Query(default=50, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """List ephemeral agents created for jobs.
+
+    These are auto-generated agents for job tasks that don't match
+    existing agents. They can be bulk deleted to clean up.
+    """
+    from netagent_core.db import Agent
+
+    try:
+        query = db.query(Agent).filter(Agent.is_ephemeral == True)
+
+        if job_id:
+            query = query.filter(Agent.created_for_job_id == job_id)
+
+        total = query.count()
+        agents = query.order_by(Agent.created_at.desc()).offset(offset).limit(limit).all()
+
+        # Get job info for each agent
+        job_ids_list = [a.created_for_job_id for a in agents if a.created_for_job_id]
+        jobs_map = {}
+        if job_ids_list:
+            jobs = db.query(Job).filter(Job.id.in_(job_ids_list)).all()
+            jobs_map = {j.id: j for j in jobs}
+
+        items = []
+        for agent in agents:
+            job = jobs_map.get(agent.created_for_job_id) if agent.created_for_job_id else None
+            # Handle missing created_for_task_name column gracefully
+            task_name = None
+            try:
+                task_name = agent.created_for_task_name
+            except Exception:
+                pass
+            items.append({
+                "id": agent.id,
+                "name": agent.name,
+                "description": agent.description,
+                "model": agent.model,
+                "job_id": agent.created_for_job_id,
+                "job_name": job.name if job else None,
+                "task_name": task_name,
+                "created_at": agent.created_at,
+            })
+
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    except Exception as e:
+        logger.error(f"Error listing ephemeral agents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ephemeral-agents/bulk-delete", response_model=BulkJobsResponse)
+async def bulk_delete_ephemeral_agents(
+    request: BulkAgentsRequest,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Delete multiple ephemeral agents at once.
+
+    Only ephemeral agents can be deleted via this endpoint.
+    Their associated sessions will also be deleted.
+    """
+    from netagent_core.db import Agent, AgentSession
+
+    success = []
+    failed = []
+
+    for agent_id in request.agent_ids:
+        agent = db.query(Agent).filter(
+            Agent.id == agent_id,
+            Agent.is_ephemeral == True,
+        ).first()
+
+        if not agent:
+            failed.append({"id": agent_id, "error": "Not found or not ephemeral"})
+            continue
+
+        try:
+            # Get session IDs for this agent
+            session_ids = [
+                session_id for (session_id,) in db.query(AgentSession.id).filter(
+                    AgentSession.agent_id == agent_id
+                ).all()
+            ]
+
+            if session_ids:
+                # Clear session_id references in job_tasks first (FK constraint)
+                db.query(JobTask).filter(
+                    JobTask.session_id.in_(session_ids)
+                ).update({JobTask.session_id: None}, synchronize_session=False)
+
+                # Delete sessions for this agent
+                db.query(AgentSession).filter(
+                    AgentSession.id.in_(session_ids)
+                ).delete(synchronize_session=False)
+
+            # Clear ephemeral_agent_id references in job_tasks (FK constraint)
+            db.query(JobTask).filter(
+                JobTask.ephemeral_agent_id == agent_id
+            ).update({JobTask.ephemeral_agent_id: None}, synchronize_session=False)
+
+            db.delete(agent)
+            db.commit()
+            success.append(agent_id)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to delete ephemeral agent {agent_id}: {e}")
+            failed.append({"id": agent_id, "error": str(e)})
+
+    logger.info(f"Bulk delete ephemeral agents: {len(success)} deleted, {len(failed)} failed by {user.email}")
+
+    return BulkJobsResponse(success=success, failed=failed)
+
+
+# =============================================================================
+# Individual Job Routes (MUST come after /bulk/* and /ephemeral-agents/* routes)
 # =============================================================================
 
 @router.get("/{job_id}", response_model=JobDetailResponse)
@@ -1024,10 +1176,28 @@ async def delete_job(
     ]
 
     if ephemeral_agent_ids:
-        # Delete sessions for these agents first (FK constraint)
-        db.query(AgentSession).filter(
-            AgentSession.agent_id.in_(ephemeral_agent_ids)
-        ).delete(synchronize_session=False)
+        # Get session IDs for these agents
+        session_ids = [
+            session_id for (session_id,) in db.query(AgentSession.id).filter(
+                AgentSession.agent_id.in_(ephemeral_agent_ids)
+            ).all()
+        ]
+
+        if session_ids:
+            # Clear session_id references in job_tasks first (FK constraint)
+            db.query(JobTask).filter(
+                JobTask.session_id.in_(session_ids)
+            ).update({JobTask.session_id: None}, synchronize_session=False)
+
+            # Delete sessions for these agents
+            db.query(AgentSession).filter(
+                AgentSession.id.in_(session_ids)
+            ).delete(synchronize_session=False)
+
+        # Clear ephemeral_agent_id references in job_tasks (FK constraint)
+        db.query(JobTask).filter(
+            JobTask.ephemeral_agent_id.in_(ephemeral_agent_ids)
+        ).update({JobTask.ephemeral_agent_id: None}, synchronize_session=False)
 
         # Delete ephemeral agents
         deleted_agents = db.query(Agent).filter(

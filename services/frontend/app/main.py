@@ -177,6 +177,25 @@ async def knowledge_list(
     )
 
 
+@app.get("/knowledge/{kb_id}", response_class=HTMLResponse)
+async def knowledge_detail(
+    kb_id: int,
+    request: Request,
+    user: ALBUser = Depends(get_current_user_optional),
+):
+    """Knowledge base detail page - view documents."""
+    return templates.TemplateResponse(
+        "knowledge_detail.html",
+        {
+            "request": request,
+            "user": user,
+            "active_page": "knowledge",
+            "pending_approvals": 0,
+            "kb_id": kb_id,
+        }
+    )
+
+
 @app.get("/devices", response_class=HTMLResponse)
 async def devices_list(
     request: Request,
@@ -206,6 +225,40 @@ async def mcp_servers(
             "request": request,
             "user": user,
             "active_page": "mcp",
+            "pending_approvals": 0,
+        }
+    )
+
+
+@app.get("/api-resources", response_class=HTMLResponse)
+async def api_resources(
+    request: Request,
+    user: ALBUser = Depends(get_current_user_optional),
+):
+    """API Resources page."""
+    return templates.TemplateResponse(
+        "api_resources.html",
+        {
+            "request": request,
+            "user": user,
+            "active_page": "api_resources",
+            "pending_approvals": 0,
+        }
+    )
+
+
+@app.get("/settings/api-docs", response_class=HTMLResponse)
+async def api_docs(
+    request: Request,
+    user: ALBUser = Depends(get_current_user_optional),
+):
+    """API Documentation page."""
+    return templates.TemplateResponse(
+        "api_docs.html",
+        {
+            "request": request,
+            "user": user,
+            "active_page": "api_docs",
             "pending_approvals": 0,
         }
     )

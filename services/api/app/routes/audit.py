@@ -1,9 +1,12 @@
 """Audit log routes."""
 
-from datetime import datetime
+import csv
+import io
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -75,6 +78,101 @@ async def query_audit_log(
         "limit": limit,
         "offset": offset,
     }
+
+
+@router.get("/export")
+async def export_audit_log(
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+    event_type: Optional[str] = None,
+    event_category: Optional[str] = None,
+    category: Optional[str] = None,  # Alias for event_category (frontend uses this)
+    user_email: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    resource_id: Optional[int] = None,
+    action: Optional[str] = None,
+    date_range: Optional[str] = None,
+    format: str = Query(default="csv"),
+):
+    """Export audit log to CSV format."""
+    query = db.query(AuditLog)
+
+    # Apply filters
+    if event_type:
+        query = query.filter(AuditLog.event_type == event_type)
+
+    # Support both category and event_category params
+    effective_category = category or event_category
+    if effective_category:
+        query = query.filter(AuditLog.event_category == effective_category)
+    if user_email:
+        query = query.filter(AuditLog.user_email.ilike(f"%{user_email}%"))
+    if resource_type:
+        query = query.filter(AuditLog.resource_type == resource_type)
+    if resource_id:
+        query = query.filter(AuditLog.resource_id == resource_id)
+    if action:
+        query = query.filter(AuditLog.action == action)
+
+    # Handle date_range filter
+    if date_range:
+        now = datetime.utcnow()
+        if date_range == "1h":
+            start_date = now - timedelta(hours=1)
+        elif date_range == "24h":
+            start_date = now - timedelta(hours=24)
+        elif date_range == "7d":
+            start_date = now - timedelta(days=7)
+        elif date_range == "30d":
+            start_date = now - timedelta(days=30)
+        else:
+            start_date = None
+
+        if start_date:
+            query = query.filter(AuditLog.created_at >= start_date)
+
+    # Limit to 10000 rows for export
+    logs = query.order_by(AuditLog.created_at.desc()).limit(10000).all()
+
+    # Generate CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Write header
+    writer.writerow([
+        "ID", "Time", "Event Type", "Category", "Action",
+        "User Email", "Resource Type", "Resource ID", "Resource Name",
+        "IP Address", "Details"
+    ])
+
+    # Write data rows
+    for log in logs:
+        import json
+        details_str = json.dumps(log.details) if log.details else ""
+        writer.writerow([
+            log.id,
+            log.created_at.isoformat() if log.created_at else "",
+            log.event_type or "",
+            log.event_category or "",
+            log.action or "",
+            log.user_email or "",
+            log.resource_type or "",
+            log.resource_id or "",
+            log.resource_name or "",
+            log.ip_address or "",
+            details_str,
+        ])
+
+    output.seek(0)
+
+    # Generate filename with timestamp
+    filename = f"audit_log_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.get("/categories")

@@ -326,17 +326,20 @@ class AgentMatcher:
         prompt_parts = [
             f"# Task: {task_name}",
             "",
-            "You are a focused task agent created to complete a specific task.",
+            "You are an ACTION-ORIENTED task agent. Your job is to EXECUTE, not plan.",
             "",
             "## Your Task",
             task_description,
             "",
-            "## Instructions",
-            "- Focus ONLY on completing the task described above",
-            "- Use the available tools to accomplish your goal",
-            "- Report your results clearly and concisely",
-            "- If you encounter errors, report them and attempt recovery",
-            "- Do not deviate from the task or take on additional work",
+            "## CRITICAL INSTRUCTIONS",
+            "- DO NOT just make plans or describe what you would do",
+            "- IMMEDIATELY use your tools to complete the task",
+            "- Execute commands and API calls RIGHT NOW",
+            "- If you need to SSH to devices, use the ssh_command tool IMMEDIATELY",
+            "- If you need data from NetBox, query it with mcp_netbox tools IMMEDIATELY",
+            "- Do not ask for permission - you have it. Just execute.",
+            "- If a task requires multiple steps, execute them one after another",
+            "- Report actual results from tool executions, not theoretical plans",
         ]
 
         if job_context:
@@ -347,19 +350,51 @@ class AgentMatcher:
                 f"Job ID: {job_context.get('job_id', 'Unknown')}",
             ])
 
+            # Add delivery configuration so agent knows where to send results
+            if job_context.get("email_recipients"):
+                recipients = job_context["email_recipients"]
+                if isinstance(recipients, list):
+                    recipients = ", ".join(recipients)
+                prompt_parts.extend([
+                    "",
+                    "## Email Recipients (USE THESE ADDRESSES)",
+                    f"When sending emails, use these recipient addresses: {recipients}",
+                    "Do NOT use placeholder emails like 'operations@example.com'.",
+                ])
+
+            if job_context.get("slack_channels"):
+                channels = job_context["slack_channels"]
+                if isinstance(channels, list):
+                    channels = ", ".join(channels)
+                prompt_parts.extend([
+                    "",
+                    "## Slack Channels (USE THESE CHANNELS)",
+                    f"When sending Slack messages, use these channels: {channels}",
+                ])
+
+            if job_context.get("webhook_urls"):
+                webhooks = job_context["webhook_urls"]
+                if isinstance(webhooks, list):
+                    webhooks = ", ".join(webhooks)
+                prompt_parts.extend([
+                    "",
+                    "## Webhook URLs (USE THESE URLS)",
+                    f"When calling webhooks, use these URLs: {webhooks}",
+                ])
+
             if job_context.get("previous_results"):
                 prompt_parts.extend([
                     "",
-                    "## Previous Task Results",
-                    "Use this data from previous tasks:",
+                    "## Previous Task Results (USE THIS DATA)",
+                    "The following data was collected by previous tasks. USE IT:",
                     str(job_context["previous_results"]),
                 ])
 
         prompt_parts.extend([
             "",
             "## Output Format",
-            "Return your results as structured data when possible.",
-            "Include a summary of what you accomplished.",
+            "Return ACTUAL results from your tool executions.",
+            "Include the real data you collected, not plans or intentions.",
         ])
 
         return "\n".join(prompt_parts)
@@ -385,6 +420,7 @@ class AgentMatcher:
             Created Agent object
         """
         from netagent_core.db import Agent
+        from netagent_core.utils import get_setting
 
         prompt = self.generate_ephemeral_prompt(task_name, task_description, job_context)
 
@@ -392,17 +428,22 @@ class AgentMatcher:
         mcp_tools = {t for t in tools if t.startswith("mcp_")}
         mcp_server_ids = self._get_mcp_server_ids_for_tools(mcp_tools) if mcp_tools else []
 
-        logger.info(f"Ephemeral agent for '{task_name}': tools={tools}, mcp_servers={mcp_server_ids}")
+        # Get the default model from settings
+        default_model = get_setting(self.db, "default_model", "gemini-2.5-flash")
+
+        logger.info(f"Ephemeral agent for '{task_name}': tools={tools}, mcp_servers={mcp_server_ids}, model={default_model}")
 
         agent = Agent(
             name=f"ephemeral-{job_id}-{task_name[:20].replace(' ', '-').lower()}",
             description=f"Auto-generated agent for task: {task_name}",
             agent_type="ephemeral",
             system_prompt=prompt,
+            model=default_model,  # Use the default model from settings
             allowed_tools=tools,
             mcp_server_ids=mcp_server_ids,  # Assign MCP servers based on required tools
             is_ephemeral=True,
             created_for_job_id=job_id,
+            created_for_task_name=task_name,
             enabled=True,
         )
 

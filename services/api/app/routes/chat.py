@@ -148,6 +148,7 @@ def build_tools_for_agent(
         "allowed_device_patterns": agent.allowed_device_patterns or ["*"],
         "knowledge_base_ids": agent.knowledge_base_ids or [],
         "mcp_server_ids": agent.mcp_server_ids or [],
+        "api_resource_ids": agent.api_resource_ids or [],
     }
     return build_tools_for_agent_config(config, db_session_factory)
 
@@ -159,7 +160,7 @@ def build_tools_for_agent_config(
     """Build tool definitions based on agent configuration dict.
 
     Args:
-        config: Dict with allowed_tools, allowed_device_patterns, knowledge_base_ids, mcp_server_ids
+        config: Dict with allowed_tools, allowed_device_patterns, knowledge_base_ids, mcp_server_ids, api_resource_ids
         db_session_factory: Factory for DB sessions
 
     Returns:
@@ -178,9 +179,12 @@ def build_tools_for_agent_config(
 
     # Knowledge search tool
     if "search_knowledge" in config.get("allowed_tools", []) and config.get("knowledge_base_ids"):
+        from netagent_core.knowledge import EmbeddingsClient
+        embeddings_client = EmbeddingsClient()
         tools.append(create_knowledge_search_tool(
             knowledge_base_ids=config["knowledge_base_ids"],
             db_session_factory=db_session_factory,
+            embeddings_client=embeddings_client,
         ))
 
     # Email tool
@@ -201,10 +205,10 @@ async def build_tools_for_agent_config_async(
     event_callback=None,
     handoff_depth: int = 0,
 ) -> List[ToolDefinition]:
-    """Build tool definitions including MCP tools and handoff tool (async version).
+    """Build tool definitions including MCP tools, API resources and handoff tool (async version).
 
     Args:
-        config: Dict with allowed_tools, allowed_device_patterns, knowledge_base_ids, mcp_server_ids
+        config: Dict with allowed_tools, allowed_device_patterns, knowledge_base_ids, mcp_server_ids, api_resource_ids
         db_session_factory: Factory for DB sessions
         session_id: Current session ID (needed for handoff tool)
         event_callback: Async callback to emit events (for handoff tool)
@@ -214,7 +218,7 @@ async def build_tools_for_agent_config_async(
         List of ToolDefinition objects
 
     Note:
-        Empty mcp_server_ids or knowledge_base_ids means "use none".
+        Empty mcp_server_ids, api_resource_ids, or knowledge_base_ids means "use none".
         Tools and resources must be explicitly selected per agent.
     """
     # Note: Empty mcp_server_ids or knowledge_base_ids means "use none"
@@ -270,6 +274,72 @@ async def build_tools_for_agent_config_async(
             logger.info(f"Loaded {len(mcp_tools)} MCP tools")
         except Exception as e:
             logger.error(f"Failed to load MCP tools: {e}")
+
+    # Add API Resource tools if configured
+    api_resource_ids = config.get("api_resource_ids", [])
+    if api_resource_ids and db_session_factory:
+        from netagent_core.tools import load_api_resources_for_agent
+
+        try:
+            api_tools = await load_api_resources_for_agent(
+                api_resource_ids=api_resource_ids,
+                db_session_factory=db_session_factory,
+            )
+            tools.extend(api_tools)
+            logger.info(f"Loaded {len(api_tools)} API resource tools")
+        except Exception as e:
+            logger.error(f"Failed to load API resource tools: {e}")
+
+    # Add memory tools if configured
+    allowed_tools = config.get("allowed_tools", [])
+    if ("recall_memory" in allowed_tools or "store_memory" in allowed_tools) and db_session_factory:
+        from netagent_core.memory import MemoryService
+        from netagent_core.tools.memory_tool import RecallMemoryTool, StoreMemoryTool
+
+        try:
+            # Get user_id and agent_id from config
+            user_id = config.get("user_id")
+            agent_id = config.get("agent_id")
+            session_id_for_memory = config.get("session_id")
+
+            # Create memory service with a fresh db session
+            with db_session_factory() as db:
+                memory_service = MemoryService(db)
+
+                if "recall_memory" in allowed_tools:
+                    recall_tool = RecallMemoryTool(
+                        memory_service=memory_service,
+                        user_id=user_id,
+                        agent_id=agent_id,
+                    )
+                    tools.append(ToolDefinition(
+                        name=recall_tool.name,
+                        description=recall_tool.description,
+                        parameters=recall_tool.parameters,
+                        handler=recall_tool.execute,
+                        requires_approval=recall_tool.requires_approval,
+                        risk_level=recall_tool.risk_level,
+                    ))
+                    logger.info("Added recall_memory tool")
+
+                if "store_memory" in allowed_tools:
+                    store_tool = StoreMemoryTool(
+                        memory_service=memory_service,
+                        user_id=user_id,
+                        agent_id=agent_id,
+                        session_id=session_id_for_memory,
+                    )
+                    tools.append(ToolDefinition(
+                        name=store_tool.name,
+                        description=store_tool.description,
+                        parameters=store_tool.parameters,
+                        handler=store_tool.execute,
+                        requires_approval=store_tool.requires_approval,
+                        risk_level=store_tool.risk_level,
+                    ))
+                    logger.info("Added store_memory tool")
+        except Exception as e:
+            logger.error(f"Failed to load memory tools: {e}")
 
     return tools
 
@@ -773,7 +843,12 @@ async def send_message(
         "allowed_device_patterns": agent.allowed_device_patterns or ["*"],
         "knowledge_base_ids": agent.knowledge_base_ids or [],
         "mcp_server_ids": agent.mcp_server_ids or [],
+        "api_resource_ids": agent.api_resource_ids or [],
         "allowed_handoff_agent_ids": agent.allowed_handoff_agent_ids,
+        # For memory tools
+        "user_id": session.user_id,
+        "agent_id": agent.id,
+        "session_id": session_id,
     }
     logger.info(f"Agent config allowed_tools: {agent_config['allowed_tools']}")
 

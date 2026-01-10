@@ -32,18 +32,15 @@
                         <div class="col-md-4">
                             <label class="form-label">Type <span class="text-danger">*</span></label>
                             <select class="form-select" id="agent-type" required>
-                                <option value="triage">Triage</option>
-                                <option value="bgp">BGP</option>
-                                <option value="ospf">OSPF</option>
-                                <option value="validator">Validator</option>
-                                <option value="docs">Documentation</option>
-                                <option value="custom">Custom</option>
+                                <option value="">Loading types...</option>
                             </select>
+                            <div class="form-text" id="type-description-hint"></div>
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Description</label>
-                            <textarea class="form-control" id="agent-description" rows="2"
-                                      placeholder="Brief description of what this agent does"></textarea>
+                            <label class="form-label">Session Prompt <small class="text-muted">(optional)</small></label>
+                            <textarea class="form-control" id="agent-session-prompt" rows="3"
+                                      placeholder="Additional instructions for this agent's sessions (e.g., focus areas, specific devices, context)..."></textarea>
+                            <div class="form-text">This will be combined with the system prompt to customize agent behavior.</div>
                         </div>
                     </div>
                 </div>
@@ -142,11 +139,27 @@
                             <br><small class="text-muted">Request human approval for actions</small>
                         </label>
                     </div>
-                    <div class="form-check">
+                    <div class="form-check mb-2">
                         <input class="form-check-input" type="checkbox" id="tool-send_email">
                         <label class="form-check-label" for="tool-send_email">
                             <strong>Send Email</strong>
                             <br><small class="text-muted">Send email notifications</small>
+                        </label>
+                    </div>
+                    <hr class="my-2">
+                    <small class="text-muted d-block mb-2"><i class="bi bi-brain me-1"></i>Memory Tools</small>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="tool-recall_memory">
+                        <label class="form-check-label" for="tool-recall_memory">
+                            <strong>Recall Memory</strong>
+                            <br><small class="text-muted">Search and recall stored memories</small>
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="tool-store_memory">
+                        <label class="form-check-label" for="tool-store_memory">
+                            <strong>Store Memory</strong>
+                            <br><small class="text-muted">Save information for future reference</small>
                         </label>
                     </div>
                 </div>
@@ -177,6 +190,20 @@
                         <div class="text-muted">Loading MCP servers...</div>
                     </div>
                     <div class="form-text mt-2">Select MCP servers this agent can use for external integrations.</div>
+                </div>
+            </div>
+
+            <!-- API Resources Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-cloud me-2"></i>API Resources</h5>
+                </div>
+                <div class="card-body">
+                    <div id="api-resources-container">
+                        <!-- Checkboxes populated dynamically -->
+                        <div class="text-muted">Loading API resources...</div>
+                    </div>
+                    <div class="form-text mt-2">Select external REST APIs this agent can call as tools.</div>
                 </div>
             </div>
 
@@ -260,26 +287,54 @@
 <script>
 const agentId = {{ agent_id if agent_id else 'null' }};
 const templateId = new URLSearchParams(window.location.search).get('template');
+const typeParam = new URLSearchParams(window.location.search).get('type');
 
 let knowledgeBases = [];
 let mcpServers = [];
+let apiResources = [];
+let agentTypes = [];
+let agentTypeMap = {};  // name -> type object
 let defaultModel = 'gemini-2.5-flash';
 
 document.addEventListener('DOMContentLoaded', async function() {
-    // Load models first, then other data in parallel
-    await loadModels();
-    await Promise.all([loadKnowledgeBases(), loadMCPServers()]);
+    // Load models and types first, then other data in parallel
+    await Promise.all([loadModels(), loadAgentTypes()]);
+    await Promise.all([loadKnowledgeBases(), loadMCPServers(), loadAPIResources()]);
 
     // Load agent or template after multi-selects are populated
     if (agentId) {
         loadAgent();
     } else if (templateId) {
         loadTemplate();
+    } else if (typeParam) {
+        // Pre-select type from URL parameter
+        loadFromType(typeParam);
     }
 
     // Temperature slider
     document.getElementById('agent-temperature').addEventListener('input', function() {
         document.getElementById('temp-value').textContent = this.value;
+    });
+
+    // Type change handler - populate system prompt from type
+    document.getElementById('agent-type').addEventListener('change', function() {
+        const typeName = this.value;
+        const typeData = agentTypeMap[typeName];
+        if (typeData) {
+            document.getElementById('type-description-hint').textContent = typeData.description || '';
+            // Only populate system prompt if it's empty or user confirms
+            const currentPrompt = document.getElementById('agent-prompt').value.trim();
+            if (typeData.system_prompt && !currentPrompt) {
+                document.getElementById('agent-prompt').value = typeData.system_prompt;
+            } else if (typeData.system_prompt && currentPrompt) {
+                // Ask if user wants to replace
+                if (confirm('Replace current system prompt with the default for this type?')) {
+                    document.getElementById('agent-prompt').value = typeData.system_prompt;
+                }
+            }
+        } else {
+            document.getElementById('type-description-hint').textContent = '';
+        }
     });
 
     // Fullscreen prompt editor
@@ -335,11 +390,83 @@ async function loadTemplate() {
     }
 }
 
+async function loadAgentTypes() {
+    try {
+        const response = await api.get('/api/agents/types');
+        agentTypes = response.items || [];
+
+        // Build lookup map
+        agentTypeMap = {};
+        agentTypes.forEach(t => {
+            agentTypeMap[t.name] = t;
+        });
+
+        // Populate select dropdown (exclude ephemeral)
+        const select = document.getElementById('agent-type');
+        const creatableTypes = agentTypes.filter(t => t.name !== 'ephemeral');
+
+        select.innerHTML = creatableTypes.map(t =>
+            `<option value="${t.name}">${t.display_name}</option>`
+        ).join('');
+
+        // Select 'custom' by default if it exists
+        if (agentTypeMap['custom']) {
+            select.value = 'custom';
+        }
+    } catch (error) {
+        console.error('Failed to load agent types:', error);
+        // Fallback to basic types
+        const select = document.getElementById('agent-type');
+        select.innerHTML = `
+            <option value="triage">Triage</option>
+            <option value="bgp">BGP</option>
+            <option value="ospf">OSPF</option>
+            <option value="validator">Validator</option>
+            <option value="documentation">Documentation</option>
+            <option value="custom" selected>Custom</option>
+        `;
+    }
+}
+
+function loadFromType(typeName) {
+    const typeData = agentTypeMap[typeName];
+    if (!typeData) {
+        console.error('Type not found:', typeName);
+        return;
+    }
+
+    // Set the type dropdown
+    document.getElementById('agent-type').value = typeName;
+    document.getElementById('type-description-hint').textContent = typeData.description || '';
+
+    // Populate system prompt from type
+    if (typeData.system_prompt) {
+        document.getElementById('agent-prompt').value = typeData.system_prompt;
+    }
+
+    // Set a default name based on type
+    document.getElementById('agent-name').value = `New ${typeData.display_name} Agent`;
+
+    showToast(`Creating new ${typeData.display_name} agent`, 'info');
+}
+
+// Session prompt separator - used to split combined prompts
+const SESSION_PROMPT_SEPARATOR = '\n\n---SESSION CONTEXT---\n';
+
 function populateForm(agent) {
     document.getElementById('agent-name').value = agent.name;
     document.getElementById('agent-type').value = agent.agent_type;
-    document.getElementById('agent-description').value = agent.description || '';
-    document.getElementById('agent-prompt').value = agent.system_prompt || '';
+
+    // Split system_prompt back into base prompt and session prompt if separator exists
+    const fullPrompt = agent.system_prompt || '';
+    if (fullPrompt.includes(SESSION_PROMPT_SEPARATOR)) {
+        const parts = fullPrompt.split(SESSION_PROMPT_SEPARATOR);
+        document.getElementById('agent-prompt').value = parts[0];
+        document.getElementById('agent-session-prompt').value = parts[1] || '';
+    } else {
+        document.getElementById('agent-prompt').value = fullPrompt;
+        document.getElementById('agent-session-prompt').value = '';
+    }
     // Set model from agent or use the default from settings
     const modelSelect = document.getElementById('agent-model');
     if (agent.model && modelSelect.querySelector(`option[value="${agent.model}"]`)) {
@@ -357,7 +484,7 @@ function populateForm(agent) {
     document.querySelector(`input[name="autonomy"][value="${agent.autonomy_level || 'recommend'}"]`).checked = true;
 
     // Tools checkboxes - uncheck all first, then check the ones in allowed_tools
-    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email'];
+    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory'];
     toolIds.forEach(toolId => {
         const checkbox = document.getElementById(`tool-${toolId}`);
         if (checkbox) {
@@ -376,6 +503,13 @@ function populateForm(agent) {
     const agentMcpIds = agent.mcp_server_ids || [];
     agentMcpIds.forEach(id => {
         const checkbox = document.getElementById(`mcp-${id}`);
+        if (checkbox) checkbox.checked = true;
+    });
+
+    // API resources checkboxes
+    const agentApiIds = agent.api_resource_ids || [];
+    agentApiIds.forEach(id => {
+        const checkbox = document.getElementById(`api-${id}`);
         if (checkbox) checkbox.checked = true;
     });
 }
@@ -485,12 +619,55 @@ async function loadMCPServers() {
     }
 }
 
+async function loadAPIResources() {
+    try {
+        const response = await api.get('/api/api-resources');
+        apiResources = response.items || response || [];
+
+        // Populate checkboxes
+        const container = document.getElementById('api-resources-container');
+        if (apiResources.length === 0) {
+            container.innerHTML = '<div class="text-muted">No API resources available. <a href="/api-resources">Add one</a></div>';
+            return;
+        }
+
+        container.innerHTML = '';
+        apiResources.forEach(resource => {
+            const div = document.createElement('div');
+            div.className = 'form-check mb-2';
+            div.innerHTML = `
+                <input class="form-check-input" type="checkbox" id="api-${resource.id}" data-api-id="${resource.id}">
+                <label class="form-check-label" for="api-${resource.id}">
+                    <strong>${escapeHtml(resource.name)}</strong>
+                    <span class="badge bg-${getMethodClass(resource.http_method)} ms-1">${resource.http_method}</span>
+                    ${resource.description ? `<br><small class="text-muted">${escapeHtml(resource.description)}</small>` : ''}
+                </label>
+            `;
+            container.appendChild(div);
+        });
+    } catch (error) {
+        console.error('Failed to load API resources:', error);
+        document.getElementById('api-resources-container').innerHTML = '<div class="text-danger">Failed to load</div>';
+    }
+}
+
+function getMethodClass(method) {
+    switch (method) {
+        case 'GET': return 'primary';
+        case 'POST': return 'success';
+        case 'PUT': return 'warning';
+        case 'PATCH': return 'info';
+        case 'DELETE': return 'danger';
+        default: return 'secondary';
+    }
+}
+
 
 async function saveAgent(e) {
     e.preventDefault();
 
     // Collect checked tools from checkboxes
-    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email'];
+    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory'];
     const allowedTools = toolIds.filter(toolId => {
         const checkbox = document.getElementById(`tool-${toolId}`);
         return checkbox && checkbox.checked;
@@ -508,11 +685,24 @@ async function saveAgent(e) {
         mcpServerIds.push(parseInt(cb.dataset.mcpId));
     });
 
+    // Collect selected API resource IDs from checkboxes
+    const apiResourceIds = [];
+    document.querySelectorAll('#api-resources-container input[type="checkbox"]:checked').forEach(cb => {
+        apiResourceIds.push(parseInt(cb.dataset.apiId));
+    });
+
+    // Combine system prompt and session prompt
+    const basePrompt = document.getElementById('agent-prompt').value.trim();
+    const sessionPrompt = document.getElementById('agent-session-prompt').value.trim();
+    const combinedPrompt = sessionPrompt
+        ? basePrompt + SESSION_PROMPT_SEPARATOR + sessionPrompt
+        : basePrompt;
+
     const data = {
         name: document.getElementById('agent-name').value,
         agent_type: document.getElementById('agent-type').value,
-        description: document.getElementById('agent-description').value,
-        system_prompt: document.getElementById('agent-prompt').value,
+        description: '',  // No longer using description field
+        system_prompt: combinedPrompt,
         model: document.getElementById('agent-model').value,
         temperature: parseFloat(document.getElementById('agent-temperature').value),
         max_tokens: parseInt(document.getElementById('agent-max-tokens').value),
@@ -521,6 +711,7 @@ async function saveAgent(e) {
         allowed_tools: allowedTools,
         knowledge_base_ids: knowledgeBaseIds,
         mcp_server_ids: mcpServerIds,
+        api_resource_ids: apiResourceIds,
         allowed_device_patterns: ['*'],  // All devices accessible
         enabled: document.getElementById('agent-enabled').checked
     };
@@ -555,7 +746,7 @@ async function testAgent() {
     }
 
     // Collect checked tools from checkboxes
-    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email'];
+    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory'];
     const allowedTools = toolIds.filter(toolId => {
         const checkbox = document.getElementById(`tool-${toolId}`);
         return checkbox && checkbox.checked;
@@ -573,11 +764,24 @@ async function testAgent() {
         mcpServerIds.push(parseInt(cb.dataset.mcpId));
     });
 
+    // Collect selected API resource IDs from checkboxes
+    const apiResourceIds = [];
+    document.querySelectorAll('#api-resources-container input[type="checkbox"]:checked').forEach(cb => {
+        apiResourceIds.push(parseInt(cb.dataset.apiId));
+    });
+
+    // Combine system prompt and session prompt
+    const basePrompt = document.getElementById('agent-prompt').value.trim();
+    const sessionPrompt = document.getElementById('agent-session-prompt').value.trim();
+    const combinedPrompt = sessionPrompt
+        ? basePrompt + SESSION_PROMPT_SEPARATOR + sessionPrompt
+        : basePrompt;
+
     const data = {
         name: document.getElementById('agent-name').value,
         agent_type: document.getElementById('agent-type').value,
-        description: document.getElementById('agent-description').value,
-        system_prompt: document.getElementById('agent-prompt').value,
+        description: '',  // No longer using description field
+        system_prompt: combinedPrompt,
         model: document.getElementById('agent-model').value,
         temperature: parseFloat(document.getElementById('agent-temperature').value),
         max_tokens: parseInt(document.getElementById('agent-max-tokens').value),
@@ -586,6 +790,7 @@ async function testAgent() {
         allowed_tools: allowedTools,
         knowledge_base_ids: knowledgeBaseIds,
         mcp_server_ids: mcpServerIds,
+        api_resource_ids: apiResourceIds,
         allowed_device_patterns: ['*'],
         enabled: document.getElementById('agent-enabled').checked
     };
