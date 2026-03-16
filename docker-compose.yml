@@ -87,6 +87,17 @@ services:
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_FROM=${SMTP_FROM:-netagent@localhost}
       - DEV_MODE=${DEV_MODE:-false}
+      # PathTrace tools
+      - NSO_BASE_URL=${NSO_BASE_URL:-https://nso.gi-nw.viasat.io}
+      - NSO_USER=${NSO_USER:-cm-admin}
+      - NSO_PASS=${NSO_PASS}
+      - A10_USER=${A10_USER:-cm-admin}
+      - A10_PASS=${A10_PASS}
+      - EV_JWT_URL=${EV_JWT_URL:-https://jwt-ipv4.us-or.viasat.io/v1/token?stripe=dsc-prod&name=eagleview}
+      - EV_JWT_BASIC=${EV_JWT_BASIC}
+      - EV_BASE_URL=${EV_BASE_URL:-https://eagleview.dsc-prod.viasat.io}
+      - NETBOX_MCP_URL=${NETBOX_MCP_URL:-http://internal-apitools-elb-cw-1573458742.us-east-1.elb.amazonaws.com:8000/mcp}
+      - NETDISCO_MCP_URL=${NETDISCO_MCP_URL:-http://internal-apitools-elb-cw-1573458742.us-east-1.elb.amazonaws.com:8003/mcp}
       - PYTHONUNBUFFERED=1
     volumes:
       - ./shared:/app/shared:ro
@@ -129,6 +140,17 @@ services:
       - SMTP_SERVER=${SMTP_SERVER}
       - SMTP_PORT=${SMTP_PORT:-25}
       - SMTP_FROM=${EMAIL_FROM_ADDRESS:-netagent@localhost}
+      # PathTrace tools
+      - NSO_BASE_URL=${NSO_BASE_URL:-https://nso.gi-nw.viasat.io}
+      - NSO_USER=${NSO_USER:-cm-admin}
+      - NSO_PASS=${NSO_PASS}
+      - A10_USER=${A10_USER:-cm-admin}
+      - A10_PASS=${A10_PASS}
+      - EV_JWT_URL=${EV_JWT_URL:-https://jwt-ipv4.us-or.viasat.io/v1/token?stripe=dsc-prod&name=eagleview}
+      - EV_JWT_BASIC=${EV_JWT_BASIC}
+      - EV_BASE_URL=${EV_BASE_URL:-https://eagleview.dsc-prod.viasat.io}
+      - NETBOX_MCP_URL=${NETBOX_MCP_URL:-http://internal-apitools-elb-cw-1573458742.us-east-1.elb.amazonaws.com:8000/mcp}
+      - NETDISCO_MCP_URL=${NETDISCO_MCP_URL:-http://internal-apitools-elb-cw-1573458742.us-east-1.elb.amazonaws.com:8003/mcp}
       - PYTHONUNBUFFERED=1
     volumes:
       - ./shared:/app/shared:ro

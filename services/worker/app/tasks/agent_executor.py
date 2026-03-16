@@ -97,7 +97,12 @@ def build_tools_for_agent(agent: Agent, db_session_factory, session_id: int):
         Resources must be explicitly configured per agent.
         MCP tools are loaded separately via build_mcp_tools_for_agent (async).
     """
-    from netagent_core.tools import create_ssh_tool, create_knowledge_search_tool, create_email_tool
+    from netagent_core.tools import (
+        create_ssh_tool, create_knowledge_search_tool, create_email_tool,
+        create_nso_route_tool, create_nso_lldp_tool, create_nso_vrfs_tool,
+        create_nso_arista_exec_tool, create_a10_cgnat_tool,
+        create_eagleview_tool, create_netbox_search_tool,
+    )
     import os
 
     tools = []
@@ -122,6 +127,22 @@ def build_tools_for_agent(agent: Agent, db_session_factory, session_id: int):
     # Email tool
     if "send_email" in allowed_tools:
         tools.append(create_email_tool())
+
+    # PathTrace tools
+    if "nso_juniper_route" in allowed_tools:
+        tools.append(create_nso_route_tool())
+    if "nso_juniper_lldp" in allowed_tools:
+        tools.append(create_nso_lldp_tool())
+    if "nso_juniper_vrfs" in allowed_tools:
+        tools.append(create_nso_vrfs_tool())
+    if "nso_arista_exec" in allowed_tools:
+        tools.append(create_nso_arista_exec_tool())
+    if "a10_cgnat_lookup" in allowed_tools:
+        tools.append(create_a10_cgnat_tool())
+    if "eagleview_lookup" in allowed_tools:
+        tools.append(create_eagleview_tool())
+    if "netbox_search" in allowed_tools:
+        tools.append(create_netbox_search_tool())
 
     return tools
 
