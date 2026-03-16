@@ -14,7 +14,8 @@ from .approval_tool import RequestApprovalTool, create_approval_tool
 from .nso_tool import create_nso_route_tool, create_nso_lldp_tool, create_nso_vrfs_tool, create_nso_arista_exec_tool
 from .a10_tool import create_a10_cgnat_tool
 from .eagleview_tool import create_eagleview_tool
-from .netbox_mcp_tool import create_netbox_search_tool
+# netbox_mcp_tool kept for internal name resolution by NSO tools, not exposed as agent tool
+from .netbox_mcp_tool import create_netbox_search_tool  # noqa: used internally by nso_tool
 
 __all__ = [
     # Base
