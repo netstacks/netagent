@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from netagent_core.db import get_db, Agent, AgentSession, AgentMessage, AgentAction
+from netagent_core.db import get_db, Agent, AgentSession, AgentMessage, AgentAction, User
 from netagent_core.auth import get_current_user, ALBUser
 from netagent_core.utils import audit_log, AuditEventType
 from netagent_core.redis_events import set_cancel_flag, publish_live_session_event
@@ -932,7 +932,9 @@ async def send_message(
                 return events_to_yield
 
             # Run agent and stream events
+            logger.info(f"[Session {session_id}] Starting agent executor loop")
             async for event in executor.run(data.content):
+                logger.info(f"[Session {session_id}] Received event: {event.event_type}")
                 # First, drain any pending handoff events (emitted during tool execution)
                 for handoff_event in await drain_handoff_events():
                     event_data = {
@@ -1008,6 +1010,7 @@ async def send_message(
 
                 elif event.event_type == "done":
                     total_tokens = event.data.get("usage", {}).get("total_tokens", 0)
+                    logger.info(f"[Session {session_id}] Done event received, total_tokens={total_tokens}")
                     yield f"data: {json.dumps({'type': 'done', 'usage': event.data.get('usage', {})})}\n\n"
 
                 elif event.event_type == "error":
@@ -1041,7 +1044,7 @@ async def send_message(
                     )
                     fresh_db.add(assistant_message)
 
-                # Update session stats
+                # Update session stats (but preserve waiting_approval status if set by approval tool)
                 fresh_session = fresh_db.query(AgentSession).filter(
                     AgentSession.id == session_id
                 ).first()
@@ -1049,12 +1052,15 @@ async def send_message(
                     fresh_session.message_count += 1
                     fresh_session.token_count += total_tokens
                     fresh_session.tool_call_count += tool_call_count
+                    # Don't overwrite waiting_approval status - the approval tool set it
 
                 fresh_db.commit()
 
         except Exception as e:
             logger.error(f"Chat error: {e}", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+        finally:
+            logger.info(f"[Session {session_id}] generate_response generator finished/cleaned up")
 
     return StreamingResponse(
         generate_response(),
@@ -1145,6 +1151,113 @@ async def cancel_session(
     )
 
     return {"message": "Session cancelled", "session_id": session_id}
+
+
+@router.post("/sessions/{session_id}/resume")
+async def resume_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Resume a session that was waiting for approval.
+
+    Verifies that the pending approval was granted before resuming.
+    Returns a streaming response to continue the agent execution.
+    """
+    from netagent_core.db import Approval
+
+    session = db.query(AgentSession).filter(AgentSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Accept both waiting_approval (normal case) and active (if approval endpoint already updated it)
+    if session.status not in ("waiting_approval", "active"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Session cannot be resumed (status: {session.status})"
+        )
+
+    # Find the most recent approval for this session
+    approval = db.query(Approval).filter(
+        Approval.session_id == session_id
+    ).order_by(Approval.created_at.desc()).first()
+
+    if not approval:
+        raise HTTPException(
+            status_code=400,
+            detail="No approval request found for this session"
+        )
+
+    if approval.status == "pending":
+        raise HTTPException(
+            status_code=400,
+            detail="Approval is still pending - please approve or reject first"
+        )
+
+    if approval.status == "rejected":
+        # Mark session as failed
+        session.status = "failed"
+        db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Approval was rejected: {approval.resolution_note or 'No reason provided'}"
+        )
+
+    if approval.status == "expired":
+        session.status = "failed"
+        db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail="Approval has expired"
+        )
+
+    if approval.status != "approved":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unexpected approval status: {approval.status}"
+        )
+
+    # Approval is granted - update session status and continue
+    session.status = "active"
+    db.commit()
+
+    # Build continuation message with approval context
+    continuation_message = (
+        f"The approval for '{approval.action_description}' was granted by {approval.resolved_by}. "
+        f"Please proceed with the approved action."
+    )
+
+    # Get the resolver's email for the message
+    if approval.resolved_by:
+        resolver = db.query(User).filter(User.id == approval.resolved_by).first()
+        if resolver:
+            continuation_message = (
+                f"The approval for '{approval.action_description}' was granted by {resolver.email}. "
+                f"Please proceed with the approved action."
+            )
+
+    # Log the resume
+    agent = db.query(Agent).filter(Agent.id == session.agent_id).first()
+    audit_log(
+        db,
+        AuditEventType.AGENT_CHAT_RESUMED,
+        user=user,
+        resource_type="agent_session",
+        resource_id=session.id,
+        resource_name=agent.name if agent else "Unknown",
+        action="resume",
+        details={
+            "approval_id": approval.id,
+            "approval_status": approval.status,
+        },
+    )
+
+    # Now send the continuation as a new message to resume the conversation
+    # This reuses the send_message logic but with our continuation prompt
+    data = MessageCreate(content=continuation_message)
+
+    # Redirect to send_message with the continuation
+    return await send_message(session_id, data, db, user)
 
 
 @router.get("/available-tools")

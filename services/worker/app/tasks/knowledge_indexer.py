@@ -11,6 +11,7 @@ from netagent_core.db import (
     KnowledgeBase,
     KnowledgeDocument,
     KnowledgeChunk,
+    Settings,
 )
 from netagent_core.knowledge.confluence_client import ConfluenceClient
 from netagent_core.knowledge.embeddings import EmbeddingsClient
@@ -292,20 +293,36 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list:
 
 @shared_task
 def sync_pending_knowledge_bases():
-    """Periodic task to sync knowledge bases that need updating."""
-    with get_db_context() as db:
-        # Find knowledge bases that need syncing
-        # (not synced in last hour or sync_status is pending)
-        from datetime import timedelta
+    """Periodic task to sync knowledge bases that need updating.
 
-        hour_ago = datetime.utcnow() - timedelta(hours=1)
+    Checks the knowledge_sync_interval setting to determine sync frequency.
+    If set to 0, automatic syncing is disabled.
+    """
+    from datetime import timedelta
+
+    with get_db_context() as db:
+        # Get sync interval from settings (default 60 minutes)
+        setting = db.query(Settings).filter(Settings.key == "knowledge_sync_interval").first()
+        sync_interval_minutes = 60  # Default
+        if setting and setting.value:
+            sync_interval_minutes = setting.value.get("value", 60)
+
+        # If interval is 0, automatic syncing is disabled
+        if sync_interval_minutes == 0:
+            logger.info("Knowledge base auto-sync is disabled (interval=0)")
+            return {"queued": 0, "disabled": True}
+
+        # Find knowledge bases that need syncing
+        interval_ago = datetime.utcnow() - timedelta(minutes=sync_interval_minutes)
 
         kbs = db.query(KnowledgeBase).filter(
-            (KnowledgeBase.last_sync_at < hour_ago) |
+            (KnowledgeBase.last_sync_at < interval_ago) |
+            (KnowledgeBase.last_sync_at.is_(None)) |
             (KnowledgeBase.sync_status == "pending")
         ).all()
 
         for kb in kbs:
             sync_knowledge_base.delay(kb.id)
 
-        return {"queued": len(kbs)}
+        logger.info(f"Knowledge base sync check: queued {len(kbs)} bases (interval={sync_interval_minutes}m)")
+        return {"queued": len(kbs), "interval_minutes": sync_interval_minutes}

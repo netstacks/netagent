@@ -201,6 +201,7 @@ class GeminiClient:
         tool_calls = []
         finish_reason = None
 
+        logger.debug(f"Parsing Gemini response: {str(data)[:500]}")
         candidates = data.get("candidates", [])
         if candidates:
             candidate = candidates[0]
@@ -428,7 +429,9 @@ class GeminiClient:
                 logger.error(f"Gemini API error {response.status_code}: {response.text}")
 
             response.raise_for_status()
-            return self._parse_response(response.json())
+            response_json = response.json()
+            logger.info(f"Gemini achat response: finish_reason={response_json.get('candidates', [{}])[0].get('finishReason', 'N/A')}, has_content={bool(response_json.get('candidates', [{}])[0].get('content'))}")
+            return self._parse_response(response_json)
 
     async def achat_stream(
         self,

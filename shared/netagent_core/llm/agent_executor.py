@@ -238,12 +238,14 @@ If a task cannot be completed, explain why clearly."""
 
             try:
                 # Call LLM
+                logger.debug(f"[Iteration {iteration}] Calling LLM with {len(api_messages)} messages")
                 response = await self.client.achat(
                     messages=api_messages,
                     tools=self._get_tools_for_api() if self.tools else None,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                 )
+                logger.info(f"[Iteration {iteration}] LLM response: has_tool_calls={response.has_tool_calls}, content_len={len(response.content) if response.content else 0}, finish_reason={response.finish_reason}")
 
                 # Handle tool calls
                 if response.has_tool_calls:
@@ -353,10 +355,13 @@ If a task cannot be completed, explain why clearly."""
                         )
 
                     # Continue loop to process tool results
+                    logger.info(f"[Iteration {iteration}] Tool calls processed, continuing to next iteration")
                     continue
 
                 # No tool calls - this is the final response
+                logger.info(f"[Iteration {iteration}] No tool calls, emitting final response")
                 if response.content:
+                    logger.info(f"[Iteration {iteration}] Content to emit: {response.content[:200]}...")
                     self.messages.append({
                         "role": "assistant",
                         "content": response.content,

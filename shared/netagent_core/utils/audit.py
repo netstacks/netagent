@@ -27,6 +27,7 @@ class AuditEventType(str, Enum):
     AGENT_DELETED = "agent.deleted"
     AGENT_CHAT_STARTED = "agent.chat.started"
     AGENT_CHAT_COMPLETED = "agent.chat.completed"
+    AGENT_CHAT_RESUMED = "agent.chat.resumed"
 
     # Workflow events
     WORKFLOW_CREATED = "workflow.created"

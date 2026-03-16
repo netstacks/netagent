@@ -49,6 +49,7 @@ DEFAULT_SETTINGS = {
     "slack_approvals": True,
     "audit_retention": 365,
     "audit_tool_results": True,
+    "knowledge_sync_interval": 60,  # Minutes between automatic knowledge base syncs (0 to disable)
 }
 
 
@@ -75,6 +76,7 @@ class SettingsUpdate(BaseModel):
     slack_approvals: Optional[bool] = None
     audit_retention: Optional[int] = None
     audit_tool_results: Optional[bool] = None
+    knowledge_sync_interval: Optional[int] = None
 
 
 def get_setting(db: Session, key: str, default=None):

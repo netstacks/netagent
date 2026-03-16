@@ -16,6 +16,7 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 SESSION_EVENTS_CHANNEL = "session:{session_id}:events"
 SESSIONS_LIVE_CHANNEL = "sessions:live"
 SESSION_CANCEL_KEY = "session:{session_id}:cancel_flag"
+JOB_CANCEL_KEY = "job:{job_id}:cancel_flag"
 
 
 def get_redis_client() -> Redis:
@@ -86,4 +87,42 @@ def clear_cancel_flag(session_id: int) -> None:
     """
     client = get_redis_client()
     key = SESSION_CANCEL_KEY.format(session_id=session_id)
+    client.delete(key)
+
+
+def set_job_cancel_flag(job_id: int, ttl_seconds: int = 3600) -> None:
+    """Set the cancellation flag for a job.
+
+    Args:
+        job_id: The job ID
+        ttl_seconds: Time-to-live for the flag (default 1 hour)
+    """
+    client = get_redis_client()
+    key = JOB_CANCEL_KEY.format(job_id=job_id)
+    client.set(key, "1", ex=ttl_seconds)
+    logger.info(f"Set cancel flag for job {job_id}")
+
+
+def check_job_cancel_flag(job_id: int) -> bool:
+    """Check if a job has been cancelled.
+
+    Args:
+        job_id: The job ID
+
+    Returns:
+        True if job is cancelled, False otherwise
+    """
+    client = get_redis_client()
+    key = JOB_CANCEL_KEY.format(job_id=job_id)
+    return client.get(key) is not None
+
+
+def clear_job_cancel_flag(job_id: int) -> None:
+    """Clear the cancellation flag for a job.
+
+    Args:
+        job_id: The job ID
+    """
+    client = get_redis_client()
+    key = JOB_CANCEL_KEY.format(job_id=job_id)
     client.delete(key)

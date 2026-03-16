@@ -12,6 +12,7 @@ from netagent_core.db import get_db, Job, JobTask, User
 from netagent_core.auth import get_current_user, ALBUser
 from netagent_core.utils import audit_log, AuditEventType
 from netagent_core.job import JobSpecParser, NaturalLanguageConverter
+from netagent_core.redis_events import set_job_cancel_flag, set_cancel_flag, clear_job_cancel_flag
 
 logger = logging.getLogger(__name__)
 
@@ -113,11 +114,6 @@ class ParsedSpecResponse(BaseModel):
     delivery: Optional[dict]
 
 
-class JobConfirm(BaseModel):
-    """Confirm a natural language job with parsed spec."""
-    spec_parsed: dict
-
-
 class TaskResponse(BaseModel):
     """Response model for a job task."""
     id: int
@@ -137,27 +133,6 @@ class TaskResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-    @classmethod
-    def from_orm_safe(cls, obj):
-        """Create TaskResponse from ORM object, handling missing columns."""
-        data = {
-            "id": obj.id,
-            "sequence": obj.sequence,
-            "name": obj.name,
-            "description": getattr(obj, "description", None),
-            "status": obj.status,
-            "agent_id": getattr(obj, "agent_id", None),
-            "agent_name_hint": getattr(obj, "agent_name_hint", None),
-            "is_batch": getattr(obj, "is_batch", False),
-            "depends_on": getattr(obj, "depends_on", None),
-            "batch_source_task": getattr(obj, "batch_source_task", None),
-            "started_at": getattr(obj, "started_at", None),
-            "completed_at": getattr(obj, "completed_at", None),
-            "result": getattr(obj, "result", None),
-            "error": getattr(obj, "error", None),
-        }
-        return cls(**data)
 
 
 class JobResponse(BaseModel):
@@ -821,25 +796,6 @@ async def get_job_tasks(
 
     return job.tasks
 
-
-@router.post("/{job_id}/confirm", response_model=JobResponse, deprecated=True)
-async def confirm_job(
-    job_id: int,
-    data: JobConfirm,
-    db: Session = Depends(get_db),
-    user: ALBUser = Depends(get_current_user),
-):
-    """DEPRECATED: This endpoint is no longer used.
-
-    Jobs now go directly to 'pending' status with tasks created on submit.
-    This endpoint is kept for backwards compatibility but will be removed in a future version.
-    """
-    raise HTTPException(
-        status_code=410,
-        detail="This endpoint is deprecated. Jobs are now created with tasks directly - no confirmation step needed."
-    )
-
-
 @router.post("/{job_id}/start", response_model=dict)
 async def start_job(
     job_id: int,
@@ -891,9 +847,17 @@ async def cancel_job(
 
     job.status = "cancelled"
     job.completed_at = datetime.utcnow()
-    db.commit()
 
-    # TODO: Signal cancellation to running tasks via Redis
+    # Signal cancellation to running tasks via Redis
+    set_job_cancel_flag(job_id)
+
+    # Also set cancel flags for any running task sessions
+    for task in job.tasks:
+        if task.status == "running" and task.session_id:
+            set_cancel_flag(task.session_id)
+            task.status = "cancelled"
+
+    db.commit()
 
     logger.info(f"Job {job.id} cancelled by {user.email}")
 
@@ -917,6 +881,9 @@ async def retry_job(
             status_code=400,
             detail=f"Job cannot be retried - current status: {job.status}"
         )
+
+    # Clear any cancellation flag from previous run
+    clear_job_cancel_flag(job_id)
 
     # Reset job state
     job.status = "queued"
@@ -964,6 +931,9 @@ async def rerun_job(
             status_code=400,
             detail=f"Job cannot be rerun - current status: {job.status}"
         )
+
+    # Clear any cancellation flag from previous run
+    clear_job_cancel_flag(job_id)
 
     # Reset job state completely
     job.status = "queued"

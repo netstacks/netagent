@@ -56,10 +56,6 @@ def check_scheduled_tasks():
         return {"checked": len(tasks), "triggered": triggered}
 
 
-# Keep old function name as alias for backwards compatibility
-check_scheduled_agents = check_scheduled_tasks
-
-
 def should_run_now(cron_expression: str, last_run: datetime = None) -> bool:
     """Check if a cron expression should run now.
 

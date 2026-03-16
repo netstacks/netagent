@@ -364,6 +364,16 @@ function handleStreamEvent(data, contentDiv, thinkingDiv, currentContent) {
             appendApprovalRequest(thinkingDiv, data);
             break;
 
+        case 'approval_requested':
+            // Agent explicitly requested approval via request_approval tool
+            updateStatus('waiting for approval');
+            appendApprovalWaiting(thinkingDiv, data);
+            // Start polling for approval status
+            if (data.approval_id) {
+                startApprovalPolling(data.approval_id);
+            }
+            break;
+
         case 'handoff_start':
             updateStatus('delegating to ' + (data.target_agent?.name || data.target_agent_name || 'agent'));
             appendHandoffCard(thinkingDiv, data);
@@ -701,6 +711,392 @@ function appendApprovalRequest(thinkingDiv, data) {
     scrollToBottom();
 }
 
+// Approval polling state
+let approvalPollingInterval = null;
+let pendingApprovalId = null;
+
+function appendApprovalWaiting(thinkingDiv, data) {
+    if (!thinkingDiv) return;
+
+    const toolsContainer = thinkingDiv.querySelector('.tool-calls');
+    const toolDiv = document.createElement('div');
+    toolDiv.className = 'tool-call approval-waiting';
+    toolDiv.id = `approval-waiting-${data.approval_id}`;
+    toolDiv.innerHTML = `
+        <div class="tool-header">
+            <i class="bi bi-hourglass-split text-warning me-2"></i>
+            <strong>Awaiting Approval</strong>
+            <span class="badge bg-warning text-dark ms-2" id="approval-status-${data.approval_id}">Pending</span>
+        </div>
+        <div class="tool-input">
+            <p class="mb-2"><strong>Action:</strong> ${escapeHtml(data.action_description || 'Approval requested')}</p>
+            <p class="mb-2"><strong>Risk Level:</strong> <span class="badge bg-${getRiskBadgeColor(data.risk_level)}">${escapeHtml(data.risk_level || 'medium')}</span></p>
+            <p class="mb-0"><strong>Expires:</strong> ${data.expires_at ? new Date(data.expires_at).toLocaleString() : 'N/A'}</p>
+        </div>
+        <div class="approval-actions mt-3" id="approval-actions-${data.approval_id}">
+            <p class="text-info mb-2">
+                <span class="spinner-border spinner-border-sm me-2"></span>
+                Waiting for approval...
+            </p>
+            <a href="/approvals" target="_blank" class="btn btn-sm btn-outline-primary me-2">
+                <i class="bi bi-shield-check me-1"></i>Go to Approvals
+            </a>
+        </div>
+    `;
+    toolsContainer.appendChild(toolDiv);
+    scrollToBottom();
+}
+
+function getRiskBadgeColor(risk) {
+    switch (risk?.toLowerCase()) {
+        case 'critical': return 'danger';
+        case 'high': return 'danger';
+        case 'medium': return 'warning';
+        case 'low': return 'success';
+        default: return 'secondary';
+    }
+}
+
+function startApprovalPolling(approvalId) {
+    pendingApprovalId = approvalId;
+
+    // Clear any existing polling
+    if (approvalPollingInterval) {
+        clearInterval(approvalPollingInterval);
+    }
+
+    // Poll every 3 seconds
+    approvalPollingInterval = setInterval(() => {
+        checkApprovalStatus(approvalId);
+    }, 3000);
+
+    // Also check immediately
+    checkApprovalStatus(approvalId);
+}
+
+function stopApprovalPolling() {
+    if (approvalPollingInterval) {
+        clearInterval(approvalPollingInterval);
+        approvalPollingInterval = null;
+    }
+    pendingApprovalId = null;
+}
+
+async function checkApprovalStatus(approvalId) {
+    try {
+        const response = await fetch(`/api/approvals/${approvalId}`, {
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            console.error('Failed to check approval status');
+            return;
+        }
+
+        const approval = await response.json();
+        const statusBadge = document.getElementById(`approval-status-${approvalId}`);
+        const actionsDiv = document.getElementById(`approval-actions-${approvalId}`);
+
+        if (approval.status === 'approved') {
+            stopApprovalPolling();
+            updateStatus('approved - ready to resume');
+
+            if (statusBadge) {
+                statusBadge.className = 'badge bg-success ms-2';
+                statusBadge.textContent = 'Approved';
+            }
+
+            if (actionsDiv) {
+                actionsDiv.innerHTML = `
+                    <p class="text-success mb-2">
+                        <i class="bi bi-check-circle me-2"></i>
+                        Approved by ${escapeHtml(approval.resolved_by || 'user')}
+                    </p>
+                    <button class="btn btn-success" onclick="resumeSession()">
+                        <i class="bi bi-play-fill me-1"></i>Resume Execution
+                    </button>
+                `;
+            }
+
+            showToast('Approval granted! Click Resume to continue.', 'success');
+
+        } else if (approval.status === 'rejected') {
+            stopApprovalPolling();
+            updateStatus('rejected');
+
+            if (statusBadge) {
+                statusBadge.className = 'badge bg-danger ms-2';
+                statusBadge.textContent = 'Rejected';
+            }
+
+            if (actionsDiv) {
+                actionsDiv.innerHTML = `
+                    <p class="text-danger mb-2">
+                        <i class="bi bi-x-circle me-2"></i>
+                        Rejected: ${escapeHtml(approval.resolution_note || 'No reason provided')}
+                    </p>
+                `;
+            }
+
+            showToast('Approval rejected', 'error');
+
+        } else if (approval.status === 'expired') {
+            stopApprovalPolling();
+            updateStatus('expired');
+
+            if (statusBadge) {
+                statusBadge.className = 'badge bg-secondary ms-2';
+                statusBadge.textContent = 'Expired';
+            }
+
+            if (actionsDiv) {
+                actionsDiv.innerHTML = `
+                    <p class="text-secondary mb-2">
+                        <i class="bi bi-clock-history me-2"></i>
+                        Approval request has expired
+                    </p>
+                `;
+            }
+
+            showToast('Approval expired', 'warning');
+        }
+        // If still pending, keep polling
+
+    } catch (error) {
+        console.error('Error checking approval status:', error);
+    }
+}
+
+async function checkAndResumeApprovalPolling(sid) {
+    // Called when loading a session that's in waiting_approval status
+    // Find the pending approval for this session and resume polling
+    try {
+        const approvalsResponse = await fetch(`/api/approvals?session_id=${sid}&status=pending`, {
+            credentials: 'include'
+        });
+
+        if (!approvalsResponse.ok) {
+            console.error('Failed to fetch approvals for session');
+            return;
+        }
+
+        const data = await approvalsResponse.json();
+        const approvals = data.items || [];
+
+        if (approvals.length > 0) {
+            // Found a pending approval - resume polling
+            const approval = approvals[0];
+            console.log('[Chat] Resuming approval polling for approval', approval.id);
+            updateStatus('waiting for approval');
+
+            // Show approval waiting UI
+            showApprovalWaitingNotice(approval);
+
+            // Start polling
+            startApprovalPolling(approval.id);
+        } else {
+            // No pending approvals - check if there's an approved one we can resume
+            const resolvedResponse = await fetch(`/api/approvals?session_id=${sid}`, {
+                credentials: 'include'
+            });
+
+            if (resolvedResponse.ok) {
+                const resolvedData = await resolvedResponse.json();
+                const allApprovals = resolvedData.items || [];
+
+                // Find most recent approval
+                if (allApprovals.length > 0) {
+                    const latestApproval = allApprovals[0];  // Already sorted by created_at desc
+
+                    if (latestApproval.status === 'approved') {
+                        // Approval was granted - show resume button
+                        updateStatus('approved - ready to resume');
+                        showApprovalApprovedNotice(latestApproval);
+                    } else if (latestApproval.status === 'rejected') {
+                        updateStatus('rejected');
+                        showApprovalRejectedNotice(latestApproval);
+                    } else if (latestApproval.status === 'expired') {
+                        updateStatus('expired');
+                        showApprovalExpiredNotice(latestApproval);
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error checking approvals for session:', error);
+    }
+}
+
+function showApprovalWaitingNotice(approval) {
+    const chatMessages = document.getElementById('chat-messages');
+    const noticeDiv = document.createElement('div');
+    noticeDiv.className = 'approval-notice alert alert-warning';
+    noticeDiv.id = `approval-notice-${approval.id}`;
+    noticeDiv.innerHTML = `
+        <div class="d-flex align-items-center">
+            <span class="spinner-border spinner-border-sm me-2"></span>
+            <div>
+                <strong>Awaiting Approval</strong>
+                <p class="mb-1 small">${escapeHtml(approval.action_description)}</p>
+                <span class="badge bg-${getRiskBadgeColor(approval.risk_level)}">${approval.risk_level}</span>
+            </div>
+        </div>
+        <div class="mt-2">
+            <a href="/approvals" target="_blank" class="btn btn-sm btn-outline-warning">
+                <i class="bi bi-shield-check me-1"></i>Go to Approvals
+            </a>
+        </div>
+    `;
+    chatMessages.appendChild(noticeDiv);
+    scrollToBottom();
+}
+
+function showApprovalApprovedNotice(approval) {
+    const chatMessages = document.getElementById('chat-messages');
+    const noticeDiv = document.createElement('div');
+    noticeDiv.className = 'approval-notice alert alert-success';
+    noticeDiv.innerHTML = `
+        <div class="d-flex align-items-center justify-content-between">
+            <div>
+                <i class="bi bi-check-circle me-2"></i>
+                <strong>Approval Granted</strong>
+                <p class="mb-0 small">${escapeHtml(approval.action_description)}</p>
+            </div>
+            <button class="btn btn-success" onclick="resumeSession()">
+                <i class="bi bi-play-fill me-1"></i>Resume
+            </button>
+        </div>
+    `;
+    chatMessages.appendChild(noticeDiv);
+    scrollToBottom();
+    showToast('Approval was granted! Click Resume to continue.', 'success');
+}
+
+function showApprovalRejectedNotice(approval) {
+    const chatMessages = document.getElementById('chat-messages');
+    const noticeDiv = document.createElement('div');
+    noticeDiv.className = 'approval-notice alert alert-danger';
+    noticeDiv.innerHTML = `
+        <div>
+            <i class="bi bi-x-circle me-2"></i>
+            <strong>Approval Rejected</strong>
+            <p class="mb-0 small">${escapeHtml(approval.action_description)}</p>
+            ${approval.resolution_note ? `<p class="mb-0 small text-muted">Reason: ${escapeHtml(approval.resolution_note)}</p>` : ''}
+        </div>
+    `;
+    chatMessages.appendChild(noticeDiv);
+    scrollToBottom();
+}
+
+function showApprovalExpiredNotice(approval) {
+    const chatMessages = document.getElementById('chat-messages');
+    const noticeDiv = document.createElement('div');
+    noticeDiv.className = 'approval-notice alert alert-secondary';
+    noticeDiv.innerHTML = `
+        <div>
+            <i class="bi bi-clock-history me-2"></i>
+            <strong>Approval Expired</strong>
+            <p class="mb-0 small">${escapeHtml(approval.action_description)}</p>
+        </div>
+    `;
+    chatMessages.appendChild(noticeDiv);
+    scrollToBottom();
+}
+
+async function resumeSession() {
+    // Use the global sessionId variable
+    if (!sessionId) {
+        showToast('No active session to resume', 'error');
+        return;
+    }
+
+    const resumeSessionId = sessionId;  // Capture for use in async code
+    updateStatus('resuming...');
+
+    try {
+        // Call the resume endpoint which returns a streaming response
+        const response = await fetch(`/api/chat/sessions/${resumeSessionId}/resume`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to resume session');
+        }
+
+        // Handle the streaming response similar to sendMessage
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let currentContent = '';
+
+        // Create new message bubble for the continuation
+        const messageContainer = document.getElementById('chat-messages');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message assistant';
+        messageDiv.innerHTML = `
+            <div class="message-content">
+                <div class="message-thinking" style="display: none;">
+                    <div class="thinking-header">
+                        <i class="bi bi-cpu text-primary me-2"></i>
+                        <span class="fw-bold">Agent Thinking</span>
+                    </div>
+                    <div class="thinking-content"></div>
+                    <div class="tool-calls"></div>
+                </div>
+                <div class="message-text"></div>
+            </div>
+        `;
+        messageContainer.appendChild(messageDiv);
+
+        const contentDiv = messageDiv.querySelector('.message-text');
+        const thinkingDiv = messageDiv.querySelector('.message-thinking');
+
+        function processStream() {
+            reader.read().then(({ done, value }) => {
+                if (done) {
+                    finishStreaming();
+                    return;
+                }
+
+                const chunk = decoder.decode(value, { stream: true });
+                buffer += chunk;
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            handleStreamEvent(data, contentDiv, thinkingDiv, currentContent);
+                            if (data.type === 'content') {
+                                currentContent += data.content || '';
+                            }
+                        } catch (e) {
+                            console.error('Parse error:', e);
+                        }
+                    }
+                }
+
+                processStream();
+            }).catch(error => {
+                console.error('Stream error:', error);
+                finishStreaming();
+            });
+        }
+
+        isStreaming = true;
+        processStream();
+
+    } catch (error) {
+        console.error('Resume error:', error);
+        showToast('Failed to resume: ' + error.message, 'error');
+        updateStatus('idle');
+    }
+}
+
 function updateToolResult(thinkingDiv, data) {
     if (!thinkingDiv) return;
 
@@ -801,6 +1197,13 @@ async function loadSession(sid) {
         // If session is not active, don't use it for new messages
         // but still display the history
         const isActive = sessionData.status === 'active';
+        const isWaitingApproval = sessionData.status === 'waiting_approval';
+
+        // If session is waiting for approval, check for pending approvals and resume polling
+        if (isWaitingApproval) {
+            sessionId = sid;  // Keep the session ID so we can resume
+            await checkAndResumeApprovalPolling(sid);
+        }
 
         // Load both messages and actions
         const [messagesResponse, actionsResponse] = await Promise.all([

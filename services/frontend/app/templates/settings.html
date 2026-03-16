@@ -162,6 +162,26 @@
 
                 <div class="card mt-4">
                     <div class="card-header">
+                        <h5 class="mb-0">Knowledge Base Sync</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Auto-Sync Interval (minutes)</label>
+                            <input type="number" class="form-control" id="setting-knowledge-sync-interval"
+                                   min="0" max="1440" value="60" style="max-width: 150px;">
+                            <div class="form-text">
+                                How often to automatically sync knowledge bases from their sources.
+                                Set to 0 to disable automatic syncing.
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveKnowledgeSettings()">
+                            <i class="bi bi-check-lg me-1"></i>Save
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card mt-4">
+                    <div class="card-header">
                         <h5 class="mb-0">Jira</h5>
                     </div>
                     <div class="card-body">
@@ -387,6 +407,12 @@ async function saveJiraSettings() {
         jira_user: document.getElementById('setting-jira-user').value,
         jira_token: document.getElementById('setting-jira-token').value,
         jira_project: document.getElementById('setting-jira-project').value
+    });
+}
+
+async function saveKnowledgeSettings() {
+    await saveSettings({
+        knowledge_sync_interval: parseInt(document.getElementById('setting-knowledge-sync-interval').value) || 0
     });
 }
 

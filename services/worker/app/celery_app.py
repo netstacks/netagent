@@ -48,7 +48,7 @@ celery_app.conf.beat_schedule = {
     },
     "sync-knowledge-bases": {
         "task": "tasks.knowledge_indexer.sync_pending_knowledge_bases",
-        "schedule": 3600.0,  # Every hour
+        "schedule": 300.0,  # Check every 5 minutes, actual sync interval controlled by setting
     },
 }
 

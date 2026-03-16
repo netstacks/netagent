@@ -24,7 +24,7 @@ from netagent_core.db import (
     AgentMessage,
 )
 from netagent_core.job import AgentMatcher, JobOrchestrator
-from netagent_core.redis_events import check_cancel_flag, publish_session_event
+from netagent_core.redis_events import check_cancel_flag, check_job_cancel_flag, publish_session_event
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,11 @@ class JobCancelled(Exception):
 
 
 def check_job_cancelled(job_id: int) -> bool:
-    """Check if a job has been cancelled."""
+    """Check if a job has been cancelled via Redis flag or database status."""
+    # Check Redis first (faster)
+    if check_job_cancel_flag(job_id):
+        return True
+    # Fall back to database check
     with get_db_context() as db:
         job = db.query(Job).filter(Job.id == job_id).first()
         return job.status == "cancelled" if job else True

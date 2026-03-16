@@ -123,21 +123,20 @@ async def approve_action(
     approval.resolution_note = data.note
     db.commit()
 
-    # Resume workflow/session if applicable
+    # Publish events so frontend can detect approval and resume
+    # Note: Don't change session status here - the resume endpoint handles that
     if approval.session_id:
         session = db.query(AgentSession).filter(AgentSession.id == approval.session_id).first()
         if session and session.status == "waiting_approval":
-            session.status = "active"
-            db.commit()
-
-            # Publish approval resolved event
+            # Publish approval resolved event - frontend will call resume endpoint
             publish_session_event(approval.session_id, "approval_resolved", {
                 "approval_id": approval.id,
                 "status": "approved",
                 "resolved_by": user.email,
             })
-            publish_live_session_event("session_resumed", {
+            publish_live_session_event("approval_granted", {
                 "session_id": approval.session_id,
+                "approval_id": approval.id,
             })
 
     audit_log(
