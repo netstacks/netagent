@@ -206,13 +206,6 @@
                             <br><small class="text-muted">Subscriber overlay data (VNO, VWA, SMTS)</small>
                         </label>
                     </div>
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" id="tool-netbox_search">
-                        <label class="form-check-label" for="tool-netbox_search">
-                            <strong>NetBox Search</strong>
-                            <br><small class="text-muted">Search device inventory, IPs, VRFs</small>
-                        </label>
-                    </div>
                 </div>
             </div>
 
@@ -535,7 +528,7 @@ function populateForm(agent) {
     document.querySelector(`input[name="autonomy"][value="${agent.autonomy_level || 'recommend'}"]`).checked = true;
 
     // Tools checkboxes - uncheck all first, then check the ones in allowed_tools
-    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory', 'nso_juniper_route', 'nso_juniper_lldp', 'nso_juniper_vrfs', 'nso_arista_exec', 'a10_cgnat_lookup', 'eagleview_lookup', 'netbox_search'];
+    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory', 'nso_juniper_route', 'nso_juniper_lldp', 'nso_juniper_vrfs', 'nso_arista_exec', 'a10_cgnat_lookup', 'eagleview_lookup'];
     toolIds.forEach(toolId => {
         const checkbox = document.getElementById(`tool-${toolId}`);
         if (checkbox) {
@@ -718,7 +711,7 @@ async function saveAgent(e) {
     e.preventDefault();
 
     // Collect checked tools from checkboxes
-    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory', 'nso_juniper_route', 'nso_juniper_lldp', 'nso_juniper_vrfs', 'nso_arista_exec', 'a10_cgnat_lookup', 'eagleview_lookup', 'netbox_search'];
+    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory', 'nso_juniper_route', 'nso_juniper_lldp', 'nso_juniper_vrfs', 'nso_arista_exec', 'a10_cgnat_lookup', 'eagleview_lookup'];
     const allowedTools = toolIds.filter(toolId => {
         const checkbox = document.getElementById(`tool-${toolId}`);
         return checkbox && checkbox.checked;
@@ -797,7 +790,7 @@ async function testAgent() {
     }
 
     // Collect checked tools from checkboxes
-    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory', 'nso_juniper_route', 'nso_juniper_lldp', 'nso_juniper_vrfs', 'nso_arista_exec', 'a10_cgnat_lookup', 'eagleview_lookup', 'netbox_search'];
+    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory', 'nso_juniper_route', 'nso_juniper_lldp', 'nso_juniper_vrfs', 'nso_arista_exec', 'a10_cgnat_lookup', 'eagleview_lookup'];
     const allowedTools = toolIds.filter(toolId => {
         const checkbox = document.getElementById(`tool-${toolId}`);
         return checkbox && checkbox.checked;
