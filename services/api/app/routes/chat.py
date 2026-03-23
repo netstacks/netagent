@@ -16,8 +16,8 @@ from netagent_core.db import get_db, Agent, AgentSession, AgentMessage, AgentAct
 from netagent_core.auth import get_current_user, ALBUser
 from netagent_core.utils import audit_log, AuditEventType
 from netagent_core.redis_events import set_cancel_flag, publish_live_session_event
-from netagent_core.llm import GeminiClient, AgentExecutor, ToolDefinition
-from netagent_core.tools import create_ssh_tool, create_knowledge_search_tool
+from netagent_core.llm import AgentExecutor, ToolDefinition, create_llm_client
+from netagent_core.tools import create_ssh_tool, create_knowledge_search_tool, create_alert_query_tool, create_alert_update_tool
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +194,14 @@ def build_tools_for_agent_config(
         logger.info("Added send_email tool")
     else:
         logger.debug(f"send_email not in allowed_tools: {config.get('allowed_tools', [])}")
+
+    # Alert tools
+    if "query_alerts" in config.get("allowed_tools", []):
+        tools.append(create_alert_query_tool(db_session_factory))
+        logger.info("Added query_alerts tool")
+    if "update_alert" in config.get("allowed_tools", []):
+        tools.append(create_alert_update_tool(db_session_factory))
+        logger.info("Added update_alert tool")
 
     return tools
 
@@ -834,6 +842,7 @@ async def send_message(
     # Extract agent configuration before starting async generator
     # (prevents SQLAlchemy session detachment issues)
     agent_config = {
+        "llm_provider": getattr(agent, 'llm_provider', None) or 'gemini',
         "model": agent.model,
         "system_prompt": agent.system_prompt,
         "max_iterations": agent.max_iterations,
@@ -884,11 +893,14 @@ async def send_message(
             await event_queue.put(event)
 
         try:
-            # Create Gemini client
+            # Create LLM client (Gemini or Bedrock based on agent config)
             try:
-                client = GeminiClient(model=agent_config["model"])
+                client = create_llm_client(
+                    provider=agent_config.get("llm_provider", "gemini"),
+                    model=agent_config["model"],
+                )
             except Exception as e:
-                logger.error(f"Failed to create Gemini client: {e}")
+                logger.error(f"Failed to create LLM client: {e}")
                 yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
                 return
 

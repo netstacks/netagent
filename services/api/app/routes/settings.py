@@ -15,18 +15,24 @@ router = APIRouter()
 
 # Approved Gemini models
 APPROVED_MODELS = [
-    {"value": "gemini-3-pro-preview", "label": "Gemini 3 Pro (Preview)", "group": "Gemini 3.x (Preview)"},
-    {"value": "gemini-3-flash-preview", "label": "Gemini 3 Flash (Preview)", "group": "Gemini 3.x (Preview)"},
-    {"value": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "group": "Gemini 2.5"},
-    {"value": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "group": "Gemini 2.5"},
-    {"value": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash Lite", "group": "Gemini 2.5"},
-    {"value": "gemini-2.5-flash-preview-09-2025", "label": "Gemini 2.5 Flash Preview (09-2025)", "group": "Gemini 2.5"},
-    {"value": "gemini-2.5-flash-lite-preview-09-2025", "label": "Gemini 2.5 Flash Lite Preview (09-2025)", "group": "Gemini 2.5"},
-    {"value": "gemini-2.5-flash-image", "label": "Gemini 2.5 Flash Image", "group": "Gemini 2.5 Multimodal"},
-    {"value": "gemini-live-2.5-flash-native-audio", "label": "Gemini Live 2.5 Flash Native Audio", "group": "Gemini 2.5 Multimodal"},
-    {"value": "gemini-2.5-pro-tts", "label": "Gemini 2.5 Pro TTS", "group": "Gemini 2.5 TTS"},
-    {"value": "gemini-2.5-flash-tts", "label": "Gemini 2.5 Flash TTS", "group": "Gemini 2.5 TTS"},
-    {"value": "gemini-2.5-flash-lite-preview-tts", "label": "Gemini 2.5 Flash Lite TTS (Preview)", "group": "Gemini 2.5 TTS"},
+    # Gemini models (via Apigee/Vertex AI)
+    {"value": "gemini-3-pro-preview", "label": "Gemini 3 Pro (Preview)", "group": "Gemini 3.x (Preview)", "provider": "gemini"},
+    {"value": "gemini-3-flash-preview", "label": "Gemini 3 Flash (Preview)", "group": "Gemini 3.x (Preview)", "provider": "gemini"},
+    {"value": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "group": "Gemini 2.5", "provider": "gemini"},
+    {"value": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "group": "Gemini 2.5", "provider": "gemini"},
+    {"value": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash Lite", "group": "Gemini 2.5", "provider": "gemini"},
+    {"value": "gemini-2.5-flash-preview-09-2025", "label": "Gemini 2.5 Flash Preview (09-2025)", "group": "Gemini 2.5", "provider": "gemini"},
+    {"value": "gemini-2.5-flash-lite-preview-09-2025", "label": "Gemini 2.5 Flash Lite Preview (09-2025)", "group": "Gemini 2.5", "provider": "gemini"},
+    {"value": "gemini-2.5-flash-image", "label": "Gemini 2.5 Flash Image", "group": "Gemini 2.5 Multimodal", "provider": "gemini"},
+    {"value": "gemini-live-2.5-flash-native-audio", "label": "Gemini Live 2.5 Flash Native Audio", "group": "Gemini 2.5 Multimodal", "provider": "gemini"},
+    {"value": "gemini-2.5-pro-tts", "label": "Gemini 2.5 Pro TTS", "group": "Gemini 2.5 TTS", "provider": "gemini"},
+    {"value": "gemini-2.5-flash-tts", "label": "Gemini 2.5 Flash TTS", "group": "Gemini 2.5 TTS", "provider": "gemini"},
+    {"value": "gemini-2.5-flash-lite-preview-tts", "label": "Gemini 2.5 Flash Lite TTS (Preview)", "group": "Gemini 2.5 TTS", "provider": "gemini"},
+    # Anthropic Claude models (via AWS Bedrock)
+    {"value": "anthropic.claude-sonnet-4-20250514-v1:0", "label": "Claude Sonnet 4", "group": "Anthropic Claude (Bedrock)", "provider": "bedrock"},
+    {"value": "anthropic.claude-haiku-4-20250414-v1:0", "label": "Claude Haiku 4", "group": "Anthropic Claude (Bedrock)", "provider": "bedrock"},
+    {"value": "us.anthropic.claude-sonnet-4-20250514-v1:0", "label": "Claude Sonnet 4 (US)", "group": "Anthropic Claude (Bedrock)", "provider": "bedrock"},
+    {"value": "us.anthropic.claude-haiku-4-20250414-v1:0", "label": "Claude Haiku 4 (US)", "group": "Anthropic Claude (Bedrock)", "provider": "bedrock"},
 ]
 
 DEFAULT_SETTINGS = {
@@ -146,12 +152,71 @@ async def get_available_models(
     db: Session = Depends(get_db),
     user: ALBUser = Depends(get_current_user),
 ):
-    """Get list of approved models and the default model."""
+    """Get list of approved models and the default model.
+
+    Returns models from the DB setting 'approved_models' if configured,
+    otherwise falls back to the built-in APPROVED_MODELS list.
+    """
     default_model = get_setting(db, "default_model", "gemini-2.5-flash")
+    custom_models = get_setting(db, "approved_models", None)
+
+    if custom_models and isinstance(custom_models, list):
+        models = custom_models
+    else:
+        models = APPROVED_MODELS
+
     return {
-        "models": APPROVED_MODELS,
+        "models": models,
         "default": default_model,
+        "is_custom": custom_models is not None,
     }
+
+
+class ModelEntry(BaseModel):
+    value: str
+    label: str
+    group: str
+    provider: str = "gemini"
+
+
+class ModelsUpdate(BaseModel):
+    models: List[ModelEntry]
+
+
+@router.put("/models")
+async def update_approved_models(
+    data: ModelsUpdate,
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Update the list of approved models."""
+    models_list = [m.model_dump() for m in data.models]
+    set_setting(db, "approved_models", models_list)
+
+    audit_log(
+        db,
+        AuditEventType.SETTINGS_UPDATED,
+        user=user,
+        resource_type="settings",
+        action="update_models",
+        details={"model_count": len(models_list)},
+    )
+
+    return {"message": f"Updated {len(models_list)} models"}
+
+
+@router.delete("/models")
+async def reset_approved_models(
+    db: Session = Depends(get_db),
+    user: ALBUser = Depends(get_current_user),
+):
+    """Reset models to built-in defaults."""
+    setting = db.query(Settings).filter(Settings.key == "approved_models").first()
+    if setting:
+        db.delete(setting)
+        db.commit()
+
+    return {"message": "Models reset to defaults", "models": APPROVED_MODELS}
 
 
 @router.post("/test-email")

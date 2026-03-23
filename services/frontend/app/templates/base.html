@@ -36,6 +36,13 @@
 
             <li class="nav-section">Operations</li>
             <li class="nav-item">
+                <a href="/alerts" class="nav-link {% if active_page == 'alerts' %}active{% endif %}">
+                    <i class="fas fa-bell"></i>
+                    <span>Alerts</span>
+                    <span class="badge bg-danger ms-auto alerts-badge" style="display:none;"></span>
+                </a>
+            </li>
+            <li class="nav-item">
                 <a href="/jobs" class="nav-link {% if active_page == 'jobs' %}active{% endif %}">
                     <i class="fas fa-list-check"></i>
                     <span>Jobs</span>

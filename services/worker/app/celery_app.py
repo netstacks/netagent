@@ -19,6 +19,7 @@ celery_app = Celery(
         "tasks.scheduled_runs",
         "tasks.notifications",
         "tasks.job_executor",
+        "tasks.alert_triage",
     ],
 )
 
@@ -30,8 +31,8 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
-    task_time_limit=3600,  # 1 hour max
-    task_soft_time_limit=3300,  # 55 minutes soft limit
+    task_time_limit=28800 + 600,  # 8 hours + 10 min buffer (for approval holds)
+    task_soft_time_limit=28800,  # 8 hours soft limit
     worker_prefetch_multiplier=1,
     task_acks_late=True,
 )

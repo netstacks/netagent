@@ -7,3 +7,4 @@ httpx==0.26.0
 cryptography==42.0.1
 croniter==2.0.1
 netmiko==4.3.0
+boto3>=1.34.0

@@ -15,34 +15,15 @@ from typing import List, Dict, Any, Optional, Generator, AsyncGenerator
 import httpx
 
 from .apigee_token import ApigeeTokenManager, get_token_manager
+from .base_client import BaseLLMClient, LLMResponse, ToolCall
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class ToolCall:
-    """Represents a tool/function call from the model."""
-
-    id: str
-    name: str
-    arguments: Dict[str, Any]
+# Backward compatibility alias
+GeminiResponse = LLMResponse
 
 
-@dataclass
-class GeminiResponse:
-    """Response from Gemini API."""
-
-    content: Optional[str] = None
-    tool_calls: List[ToolCall] = field(default_factory=list)
-    finish_reason: Optional[str] = None
-    usage: Dict[str, int] = field(default_factory=dict)
-
-    @property
-    def has_tool_calls(self) -> bool:
-        return len(self.tool_calls) > 0
-
-
-class GeminiClient:
+class GeminiClient(BaseLLMClient):
     """Client for Gemini API via Apigee.
 
     Usage:
@@ -195,7 +176,7 @@ class GeminiClient:
             return [{"functionDeclarations": function_declarations}]
         return []
 
-    def _parse_response(self, data: Dict[str, Any]) -> GeminiResponse:
+    def _parse_response(self, data: Dict[str, Any]) -> LLMResponse:
         """Parse Gemini API response."""
         content = None
         tool_calls = []
@@ -229,7 +210,7 @@ class GeminiClient:
                 "total_tokens": usage_data.get("totalTokenCount", 0),
             }
 
-        return GeminiResponse(
+        return LLMResponse(
             content=content,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
@@ -243,7 +224,7 @@ class GeminiClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 0.1,
         max_tokens: int = 4096,
-    ) -> GeminiResponse:
+    ) -> LLMResponse:
         """Send chat completion request.
 
         Args:
@@ -254,7 +235,7 @@ class GeminiClient:
             max_tokens: Maximum tokens in response
 
         Returns:
-            GeminiResponse with content and/or tool calls
+            LLMResponse with content and/or tool calls
         """
         model = model or self.default_model
         system_instruction, contents = self._convert_messages_to_gemini(messages)
@@ -386,7 +367,7 @@ class GeminiClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 0.1,
         max_tokens: int = 4096,
-    ) -> GeminiResponse:
+    ) -> LLMResponse:
         """Async chat completion request."""
         model = model or self.default_model
         system_instruction, contents = self._convert_messages_to_gemini(messages)

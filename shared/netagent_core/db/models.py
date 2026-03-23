@@ -69,6 +69,7 @@ class Agent(Base):
     system_prompt = Column(Text, nullable=False)
 
     # LLM Configuration
+    llm_provider = Column(String(20), default="gemini")  # gemini, bedrock
     model = Column(String(100), default="gemini-2.0-flash")
     temperature = Column(Float, default=0.1)
     max_tokens = Column(Integer, default=4096)
@@ -763,6 +764,77 @@ class Memory(Base):
     __table_args__ = (
         Index("idx_memories_scope", "user_id", "agent_id", "is_active"),
         Index("idx_memories_category_active", "category", "is_active"),
+    )
+
+
+# =============================================================================
+# ALERT PIPELINE MODELS
+# =============================================================================
+
+
+class Alert(Base):
+    """Normalized network alert events.
+
+    Alerts are ingested from various sources (syslog, Splunk, SNMP, webhooks),
+    normalized into a common format, and routed to the AI Triage Agent for
+    assessment and handling.
+    """
+
+    __tablename__ = "alerts"
+
+    id = Column(Integer, primary_key=True)
+
+    # Source info
+    source_type = Column(String(30), nullable=False, index=True)  # syslog, splunk, snmp, webhook, generic
+    source_name = Column(String(255))  # e.g., "splunk-prod", "syslog-core-rtr"
+
+    # Normalized fields
+    severity = Column(String(20), nullable=False, index=True)  # critical, major, minor, warning, info
+    alert_type = Column(String(100), index=True)  # interface_down, bgp_peer_down, high_cpu, etc.
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+
+    # Device context
+    device_name = Column(String(255), index=True)
+    device_ip = Column(String(50))
+    interface_name = Column(String(100))
+
+    # Original data
+    raw_data = Column(JSONB)
+
+    # Lifecycle
+    status = Column(String(30), default="new", index=True)
+    # new, triaging, handed_off, investigating, resolved, suppressed
+
+    # Agent tracking
+    triage_session_id = Column(Integer, ForeignKey("agent_sessions.id"))
+    handler_session_id = Column(Integer, ForeignKey("agent_sessions.id"))
+
+    # Dedup / correlation
+    correlation_key = Column(String(255), index=True)  # hash of device_name + alert_type
+    correlation_count = Column(Integer, default=1)
+
+    # Enrichment (populated by triage agent)
+    enrichment_data = Column(JSONB)
+
+    # Resolution
+    resolved_by = Column(String(255))  # agent name or user email
+    resolution_note = Column(Text)
+
+    # Timestamps
+    received_at = Column(DateTime, default=datetime.utcnow, index=True)
+    occurred_at = Column(DateTime)  # when event actually happened (from source)
+    resolved_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    triage_session = relationship("AgentSession", foreign_keys=[triage_session_id])
+    handler_session = relationship("AgentSession", foreign_keys=[handler_session_id])
+
+    __table_args__ = (
+        Index("idx_alerts_status_received", "status", "received_at"),
+        Index("idx_alerts_device_status", "device_name", "status"),
+        Index("idx_alerts_severity_status", "severity", "status"),
     )
 
 

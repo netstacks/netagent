@@ -163,47 +163,19 @@
                         </label>
                     </div>
                     <hr class="my-2">
-                    <small class="text-muted d-block mb-2"><i class="bi bi-diagram-3 me-1"></i>PathTrace Tools</small>
+                    <small class="text-muted d-block mb-2"><i class="bi bi-bell me-1"></i>Alert Tools</small>
                     <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" id="tool-nso_juniper_route">
-                        <label class="form-check-label" for="tool-nso_juniper_route">
-                            <strong>NSO Route Lookup</strong>
-                            <br><small class="text-muted">Look up routes on Juniper devices (VRF-aware)</small>
+                        <input class="form-check-input" type="checkbox" id="tool-query_alerts">
+                        <label class="form-check-label" for="tool-query_alerts">
+                            <strong>Query Alerts</strong>
+                            <br><small class="text-muted">Search recent network alerts by device, severity, status</small>
                         </label>
                     </div>
                     <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" id="tool-nso_juniper_lldp">
-                        <label class="form-check-label" for="tool-nso_juniper_lldp">
-                            <strong>NSO LLDP Neighbors</strong>
-                            <br><small class="text-muted">Discover L2 topology on Juniper devices</small>
-                        </label>
-                    </div>
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" id="tool-nso_juniper_vrfs">
-                        <label class="form-check-label" for="tool-nso_juniper_vrfs">
-                            <strong>NSO List VRFs</strong>
-                            <br><small class="text-muted">List routing instances on Juniper devices</small>
-                        </label>
-                    </div>
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" id="tool-nso_arista_exec">
-                        <label class="form-check-label" for="tool-nso_arista_exec">
-                            <strong>NSO Arista CLI</strong>
-                            <br><small class="text-muted">Run show commands on Arista switches</small>
-                        </label>
-                    </div>
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" id="tool-a10_cgnat_lookup">
-                        <label class="form-check-label" for="tool-a10_cgnat_lookup">
-                            <strong>A10 CGNAT Lookup</strong>
-                            <br><small class="text-muted">Query NAT sessions on A10 load balancers</small>
-                        </label>
-                    </div>
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" id="tool-eagleview_lookup">
-                        <label class="form-check-label" for="tool-eagleview_lookup">
-                            <strong>EagleView Lookup</strong>
-                            <br><small class="text-muted">Subscriber overlay data (VNO, VWA, SMTS)</small>
+                        <input class="form-check-input" type="checkbox" id="tool-update_alert">
+                        <label class="form-check-label" for="tool-update_alert">
+                            <strong>Update Alert</strong>
+                            <br><small class="text-muted">Change alert status and add resolution notes</small>
                         </label>
                     </div>
                 </div>
@@ -528,7 +500,7 @@ function populateForm(agent) {
     document.querySelector(`input[name="autonomy"][value="${agent.autonomy_level || 'recommend'}"]`).checked = true;
 
     // Tools checkboxes - uncheck all first, then check the ones in allowed_tools
-    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory', 'nso_juniper_route', 'nso_juniper_lldp', 'nso_juniper_vrfs', 'nso_arista_exec', 'a10_cgnat_lookup', 'eagleview_lookup'];
+    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory', 'query_alerts', 'update_alert'];
     toolIds.forEach(toolId => {
         const checkbox = document.getElementById(`tool-${toolId}`);
         if (checkbox) {
@@ -711,7 +683,7 @@ async function saveAgent(e) {
     e.preventDefault();
 
     // Collect checked tools from checkboxes
-    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory', 'nso_juniper_route', 'nso_juniper_lldp', 'nso_juniper_vrfs', 'nso_arista_exec', 'a10_cgnat_lookup', 'eagleview_lookup'];
+    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory', 'query_alerts', 'update_alert'];
     const allowedTools = toolIds.filter(toolId => {
         const checkbox = document.getElementById(`tool-${toolId}`);
         return checkbox && checkbox.checked;
@@ -790,7 +762,7 @@ async function testAgent() {
     }
 
     // Collect checked tools from checkboxes
-    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory', 'nso_juniper_route', 'nso_juniper_lldp', 'nso_juniper_vrfs', 'nso_arista_exec', 'a10_cgnat_lookup', 'eagleview_lookup'];
+    const toolIds = ['ssh_command', 'search_knowledge', 'handoff_to_agent', 'request_approval', 'send_email', 'recall_memory', 'store_memory', 'query_alerts', 'update_alert'];
     const allowedTools = toolIds.filter(toolId => {
         const checkbox = document.getElementById(`tool-${toolId}`);
         return checkbox && checkbox.checked;

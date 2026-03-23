@@ -103,7 +103,7 @@ The handoff is synchronous - you will wait for and receive the agent's response.
             String result from the target agent
         """
         from netagent_core.db import Agent, AgentSession
-        from netagent_core.llm import GeminiClient, AgentExecutor, AgentEvent, ToolDefinition
+        from netagent_core.llm import AgentExecutor, AgentEvent, ToolDefinition, create_llm_client
 
         start_time = time.time()
         context = context or {}
@@ -158,6 +158,7 @@ The handoff is synchronous - you will wait for and receive the agent's response.
             agent_config = {
                 "id": agent.id,
                 "name": agent.name,
+                "llm_provider": getattr(agent, 'llm_provider', None) or 'gemini',
                 "model": agent.model,
                 "system_prompt": agent.system_prompt,
                 "temperature": agent.temperature,
@@ -196,8 +197,11 @@ The handoff is synchronous - you will wait for and receive the agent's response.
             # Build the message for the child agent
             child_message = self._build_child_message(task_summary, context)
 
-            # Create child executor
-            client = GeminiClient(model=agent_config["model"])
+            # Create child executor with provider-aware client
+            client = create_llm_client(
+                provider=agent_config.get("llm_provider", "gemini"),
+                model=agent_config["model"],
+            )
             child_executor = AgentExecutor(
                 client=client,
                 system_prompt=agent_config["system_prompt"],

@@ -298,6 +298,23 @@ async def audit_log(
     )
 
 
+@app.get("/alerts", response_class=HTMLResponse)
+async def alerts_dashboard(
+    request: Request,
+    user: ALBUser = Depends(get_current_user_optional),
+):
+    """Alerts dashboard page."""
+    return templates.TemplateResponse(
+        "alerts.html",
+        {
+            "request": request,
+            "user": user,
+            "active_page": "alerts",
+            "pending_approvals": 0,
+        }
+    )
+
+
 @app.get("/sessions", response_class=HTMLResponse)
 async def sessions_list(
     request: Request,

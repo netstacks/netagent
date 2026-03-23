@@ -58,6 +58,7 @@ class AgentCreate(BaseModel):
     description: Optional[str] = None
     agent_type: str
     system_prompt: str
+    llm_provider: str = "gemini"
     model: str = "gemini-2.0-flash"
     temperature: float = 0.1
     max_tokens: int = 4096
@@ -76,6 +77,7 @@ class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     system_prompt: Optional[str] = None
+    llm_provider: Optional[str] = None
     model: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None

@@ -16,7 +16,7 @@ from netagent_core.db import (
     AgentMessage,
     AgentAction,
 )
-from netagent_core.llm import GeminiClient, AgentExecutor
+from netagent_core.llm import AgentExecutor, create_llm_client
 from netagent_core.llm.agent_executor import ToolDefinition
 from netagent_core.redis_events import check_cancel_flag, publish_live_session_event
 
@@ -38,7 +38,7 @@ class ApprovalExpired(Exception):
     pass
 
 
-def wait_for_approval(session_id: int, approval_id: int, poll_interval: int = 5, timeout_seconds: int = 3600):
+def wait_for_approval(session_id: int, approval_id: int, poll_interval: int = 5, timeout_seconds: int = 28800):
     """Block until an approval is resolved or timeout.
 
     Args:
@@ -99,9 +99,7 @@ def build_tools_for_agent(agent: Agent, db_session_factory, session_id: int):
     """
     from netagent_core.tools import (
         create_ssh_tool, create_knowledge_search_tool, create_email_tool,
-        create_nso_route_tool, create_nso_lldp_tool, create_nso_vrfs_tool,
-        create_nso_arista_exec_tool, create_a10_cgnat_tool,
-        create_eagleview_tool,
+        create_alert_query_tool, create_alert_update_tool,
     )
     import os
 
@@ -128,19 +126,12 @@ def build_tools_for_agent(agent: Agent, db_session_factory, session_id: int):
     if "send_email" in allowed_tools:
         tools.append(create_email_tool())
 
-    # PathTrace tools
-    if "nso_juniper_route" in allowed_tools:
-        tools.append(create_nso_route_tool())
-    if "nso_juniper_lldp" in allowed_tools:
-        tools.append(create_nso_lldp_tool())
-    if "nso_juniper_vrfs" in allowed_tools:
-        tools.append(create_nso_vrfs_tool())
-    if "nso_arista_exec" in allowed_tools:
-        tools.append(create_nso_arista_exec_tool())
-    if "a10_cgnat_lookup" in allowed_tools:
-        tools.append(create_a10_cgnat_tool())
-    if "eagleview_lookup" in allowed_tools:
-        tools.append(create_eagleview_tool())
+    # Alert tools
+    if "query_alerts" in allowed_tools:
+        tools.append(create_alert_query_tool(db_session_factory))
+    if "update_alert" in allowed_tools:
+        tools.append(create_alert_update_tool(db_session_factory))
+
     return tools
 
 
@@ -221,8 +212,11 @@ async def _run_agent_session(session_id: int, initial_message: str = None):
 
             logger.info(f"Agent {agent.id} has {len(tools)} total tools available")
 
-            # Create Gemini client
-            client = GeminiClient(model=agent.model)
+            # Create LLM client (Gemini or Bedrock based on agent config)
+            client = create_llm_client(
+                provider=getattr(agent, 'llm_provider', None) or 'gemini',
+                model=agent.model,
+            )
 
             # Create executor
             executor = AgentExecutor(

@@ -154,5 +154,64 @@ def mock_redis():
 @pytest.fixture(autouse=True)
 def mock_celery():
     """Mock Celery task dispatching for testing."""
-    with patch('celery.shared_task', lambda **kwargs: lambda f: f):
+    try:
+        with patch('celery.shared_task', lambda **kwargs: lambda f: f):
+            yield
+    except (ImportError, ModuleNotFoundError):
+        # Celery not installed in test env, skip mocking
         yield
+
+
+@pytest.fixture
+def mock_alert():
+    """Create a mock Alert model."""
+    from datetime import datetime
+
+    alert = MagicMock()
+    alert.id = 1
+    alert.source_type = "syslog"
+    alert.severity = "major"
+    alert.alert_type = "interface_down"
+    alert.title = "Interface GigabitEthernet0/1 is down"
+    alert.description = "Link failure detected"
+    alert.device_name = "core-rtr-01"
+    alert.device_ip = "10.1.1.1"
+    alert.interface_name = "GigabitEthernet0/1"
+    alert.status = "new"
+    alert.correlation_key = "abc123"
+    alert.correlation_count = 1
+    alert.triage_session_id = None
+    alert.handler_session_id = None
+    alert.received_at = datetime.utcnow()
+    alert.occurred_at = None
+    alert.resolved_at = None
+    alert.raw_data = {"raw_message": "Interface GigabitEthernet0/1 is down"}
+    return alert
+
+
+@pytest.fixture
+def sample_syslog_messages():
+    """Sample syslog messages for testing normalization."""
+    return [
+        {
+            "raw": "<131>Jan 10 08:15:23 core-rtr-01 Interface GigabitEthernet0/1 is down",
+            "facility": 16,
+            "severity": 3,
+            "source_ip": "10.1.1.1",
+            "expected_type": "interface_down",
+        },
+        {
+            "raw": "<134>Jan 10 08:20:00 edge-sw-01 BGP peer 10.0.0.1 session reset",
+            "facility": 16,
+            "severity": 6,
+            "source_ip": "10.1.2.1",
+            "expected_type": "bgp_peer_down",
+        },
+        {
+            "raw": "<132>Jan 10 09:00:00 core-rtr-02 CPU utilization exceeded threshold",
+            "facility": 16,
+            "severity": 4,
+            "source_ip": "10.1.1.2",
+            "expected_type": "high_cpu",
+        },
+    ]

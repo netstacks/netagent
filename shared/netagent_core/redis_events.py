@@ -17,6 +17,8 @@ SESSION_EVENTS_CHANNEL = "session:{session_id}:events"
 SESSIONS_LIVE_CHANNEL = "sessions:live"
 SESSION_CANCEL_KEY = "session:{session_id}:cancel_flag"
 JOB_CANCEL_KEY = "job:{job_id}:cancel_flag"
+ALERTS_LIVE_CHANNEL = "alerts:live"
+ALERT_DEDUP_KEY = "alert:dedup:{correlation_key}"
 
 
 def get_redis_client() -> Redis:
@@ -126,3 +128,16 @@ def clear_job_cancel_flag(job_id: int) -> None:
     client = get_redis_client()
     key = JOB_CANCEL_KEY.format(job_id=job_id)
     client.delete(key)
+
+
+def publish_alert_event(event_type: str, data: dict) -> None:
+    """Publish an event to the alerts live channel.
+
+    Args:
+        event_type: Type of event (e.g., 'alert_received', 'alert_triaged')
+        data: Event data including alert details
+    """
+    client = get_redis_client()
+    message = json.dumps({"type": event_type, **data})
+    client.publish(ALERTS_LIVE_CHANNEL, message)
+    logger.debug(f"Published {event_type} to {ALERTS_LIVE_CHANNEL}")

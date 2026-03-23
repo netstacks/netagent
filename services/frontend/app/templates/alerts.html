@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+
+{% block title %}Alerts - NetAgent{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1"><i class="fas fa-bell text-danger"></i> Alert Dashboard</h2>
+        <p class="text-muted mb-0">AI-powered NOC alert monitoring and triage</p>
+    </div>
+    <div>
+        <button class="btn btn-outline-secondary btn-sm" id="btn-refresh">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="row mb-4" id="stats-cards">
+    <div class="col-md-2">
+        <div class="card border-danger">
+            <div class="card-body text-center py-2">
+                <h3 class="mb-0 text-danger" id="stat-critical">-</h3>
+                <small class="text-muted">Critical</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card border-warning">
+            <div class="card-body text-center py-2">
+                <h3 class="mb-0 text-warning" id="stat-major">-</h3>
+                <small class="text-muted">Major</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card border-info">
+            <div class="card-body text-center py-2">
+                <h3 class="mb-0 text-info" id="stat-minor">-</h3>
+                <small class="text-muted">Minor</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card border-secondary">
+            <div class="card-body text-center py-2">
+                <h3 class="mb-0 text-secondary" id="stat-warning">-</h3>
+                <small class="text-muted">Warning</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card border-success">
+            <div class="card-body text-center py-2">
+                <h3 class="mb-0 text-success" id="stat-active">-</h3>
+                <small class="text-muted">Active</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card">
+            <div class="card-body text-center py-2">
+                <h3 class="mb-0" id="stat-total">-</h3>
+                <small class="text-muted">Total (24h)</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card mb-4">
+    <div class="card-body py-3">
+        <div class="row g-3">
+            <div class="col-md-2">
+                <label class="form-label small">Status</label>
+                <select class="form-select form-select-sm" id="filter-status">
+                    <option value="">All</option>
+                    <option value="new">New</option>
+                    <option value="triaging">Triaging</option>
+                    <option value="handed_off">Handed Off</option>
+                    <option value="investigating">Investigating</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="suppressed">Suppressed</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Severity</label>
+                <select class="form-select form-select-sm" id="filter-severity">
+                    <option value="">All</option>
+                    <option value="critical">Critical</option>
+                    <option value="major">Major</option>
+                    <option value="minor">Minor</option>
+                    <option value="warning">Warning</option>
+                    <option value="info">Info</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Source</label>
+                <select class="form-select form-select-sm" id="filter-source">
+                    <option value="">All</option>
+                    <option value="syslog">Syslog</option>
+                    <option value="splunk">Splunk</option>
+                    <option value="snmp">SNMP</option>
+                    <option value="webhook">Webhook</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Device</label>
+                <input type="text" class="form-control form-control-sm" id="filter-device" placeholder="Search device...">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Time Range</label>
+                <select class="form-select form-select-sm" id="filter-hours">
+                    <option value="1">Last 1 hour</option>
+                    <option value="4">Last 4 hours</option>
+                    <option value="24" selected>Last 24 hours</option>
+                    <option value="72">Last 3 days</option>
+                    <option value="168">Last 7 days</option>
+                </select>
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <button class="btn btn-primary btn-sm w-100" id="btn-filter">Filter</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Alerts Table -->
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 5%">Sev</th>
+                        <th style="width: 30%">Alert</th>
+                        <th style="width: 15%">Device</th>
+                        <th style="width: 10%">Source</th>
+                        <th style="width: 10%">Status</th>
+                        <th style="width: 5%">Count</th>
+                        <th style="width: 15%">Received</th>
+                        <th style="width: 10%">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="alerts-table-body">
+                    <tr>
+                        <td colspan="8" class="text-center py-4 text-muted">
+                            <i class="bi bi-arrow-clockwise spin"></i> Loading alerts...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Pagination -->
+<div class="d-flex justify-content-between align-items-center mt-3">
+    <small class="text-muted" id="pagination-info">Showing 0 alerts</small>
+    <nav>
+        <ul class="pagination pagination-sm mb-0" id="pagination"></ul>
+    </nav>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const severityColors = {
+    critical: 'danger',
+    major: 'warning',
+    minor: 'info',
+    warning: 'secondary',
+    info: 'light'
+};
+
+const statusBadges = {
+    new: 'primary',
+    triaging: 'info',
+    handed_off: 'warning',
+    investigating: 'primary',
+    resolved: 'success',
+    suppressed: 'secondary'
+};
+
+let currentOffset = 0;
+const pageSize = 50;
+
+function getFilters() {
+    return {
+        status: document.getElementById('filter-status').value,
+        severity: document.getElementById('filter-severity').value,
+        source_type: document.getElementById('filter-source').value,
+        device_name: document.getElementById('filter-device').value,
+        hours: document.getElementById('filter-hours').value,
+    };
+}
+
+async function loadStats() {
+    try {
+        const hours = document.getElementById('filter-hours').value;
+        const response = await fetch(`/api/alerts/stats?hours=${hours}`);
+        const data = await response.json();
+
+        document.getElementById('stat-critical').textContent = data.severity_counts.critical || 0;
+        document.getElementById('stat-major').textContent = data.severity_counts.major || 0;
+        document.getElementById('stat-minor').textContent = data.severity_counts.minor || 0;
+        document.getElementById('stat-warning').textContent = data.severity_counts.warning || 0;
+        document.getElementById('stat-active').textContent = data.active_count || 0;
+        document.getElementById('stat-total').textContent = data.total_count || 0;
+
+        // Update sidebar badge
+        const badge = document.querySelector('.alerts-badge');
+        if (badge && data.active_count > 0) {
+            badge.textContent = data.active_count;
+            badge.style.display = '';
+        }
+    } catch (error) {
+        console.error('Failed to load stats:', error);
+    }
+}
+
+async function loadAlerts() {
+    const filters = getFilters();
+    const params = new URLSearchParams();
+
+    if (filters.status) params.set('status', filters.status);
+    if (filters.severity) params.set('severity', filters.severity);
+    if (filters.source_type) params.set('source_type', filters.source_type);
+    if (filters.device_name) params.set('device_name', filters.device_name);
+    params.set('hours', filters.hours);
+    params.set('limit', pageSize);
+    params.set('offset', currentOffset);
+
+    try {
+        const response = await fetch(`/api/alerts?${params}`);
+        const data = await response.json();
+
+        const tbody = document.getElementById('alerts-table-body');
+
+        if (data.items.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-muted">No alerts found</td></tr>`;
+            document.getElementById('pagination-info').textContent = 'No alerts';
+            return;
+        }
+
+        tbody.innerHTML = data.items.map(alert => {
+            const sevColor = severityColors[alert.severity] || 'secondary';
+            const statusColor = statusBadges[alert.status] || 'secondary';
+            const receivedAt = alert.received_at ? new Date(alert.received_at).toLocaleString() : '-';
+            const countBadge = alert.correlation_count > 1 ? `<span class="badge bg-secondary">${alert.correlation_count}x</span>` : '';
+
+            let actions = '';
+            if (alert.triage_session_id) {
+                actions += `<a href="/sessions/${alert.triage_session_id}" class="btn btn-outline-primary btn-sm" title="View triage session"><i class="bi bi-chat-dots"></i></a> `;
+            }
+            if (alert.handler_session_id) {
+                actions += `<a href="/sessions/${alert.handler_session_id}" class="btn btn-outline-success btn-sm" title="View handler session"><i class="bi bi-tools"></i></a> `;
+            }
+
+            return `<tr>
+                <td><span class="badge bg-${sevColor}">${alert.severity}</span></td>
+                <td>
+                    <div class="fw-semibold">${escapeHtml(alert.title).substring(0, 80)}</div>
+                    <small class="text-muted">${alert.alert_type || ''}</small>
+                </td>
+                <td>${escapeHtml(alert.device_name || '-')}</td>
+                <td><span class="badge bg-dark bg-opacity-10 text-dark">${alert.source_type}</span></td>
+                <td><span class="badge bg-${statusColor}">${alert.status}</span></td>
+                <td>${countBadge || '1'}</td>
+                <td><small>${receivedAt}</small></td>
+                <td>${actions}</td>
+            </tr>`;
+        }).join('');
+
+        document.getElementById('pagination-info').textContent =
+            `Showing ${currentOffset + 1}-${currentOffset + data.items.length} of ${data.total} alerts`;
+
+    } catch (error) {
+        console.error('Failed to load alerts:', error);
+        document.getElementById('alerts-table-body').innerHTML =
+            `<tr><td colspan="8" class="text-center py-4 text-danger">Failed to load alerts</td></tr>`;
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Event listeners
+document.getElementById('btn-refresh').addEventListener('click', () => {
+    loadStats();
+    loadAlerts();
+});
+
+document.getElementById('btn-filter').addEventListener('click', () => {
+    currentOffset = 0;
+    loadStats();
+    loadAlerts();
+});
+
+// Auto-refresh every 30 seconds
+setInterval(() => {
+    loadStats();
+    loadAlerts();
+}, 30000);
+
+// Initial load
+loadStats();
+loadAlerts();
+</script>
+{% endblock %}

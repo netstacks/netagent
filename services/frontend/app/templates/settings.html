@@ -14,6 +14,9 @@
             <button class="nav-link active text-start" data-bs-toggle="pill" data-bs-target="#tab-general">
                 <i class="bi bi-gear me-2"></i>General
             </button>
+            <button class="nav-link text-start" data-bs-toggle="pill" data-bs-target="#tab-models">
+                <i class="bi bi-cpu me-2"></i>AI Models
+            </button>
             <button class="nav-link text-start" data-bs-toggle="pill" data-bs-target="#tab-notifications">
                 <i class="bi bi-bell me-2"></i>Notifications
             </button>
@@ -57,6 +60,45 @@
                         </div>
                         <button class="btn btn-primary" onclick="saveGeneralSettings()">
                             <i class="bi bi-check-lg me-1"></i>Save Changes
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Models -->
+            <div class="tab-pane fade" id="tab-models">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Approved AI Models</h5>
+                        <div>
+                            <button class="btn btn-outline-secondary btn-sm me-2" onclick="resetModelsToDefaults()">
+                                <i class="bi bi-arrow-counterclockwise me-1"></i>Reset to Defaults
+                            </button>
+                            <button class="btn btn-primary btn-sm" onclick="addModelRow()">
+                                <i class="bi bi-plus-lg me-1"></i>Add Model
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small">Configure which AI models are available when creating agents. Models are grouped by provider.</p>
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Model ID</th>
+                                        <th>Display Name</th>
+                                        <th>Group</th>
+                                        <th>Provider</th>
+                                        <th style="width: 60px"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="models-table-body">
+                                    <tr><td colspan="5" class="text-center text-muted">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <button class="btn btn-primary mt-2" onclick="saveModels()">
+                            <i class="bi bi-check-lg me-1"></i>Save Models
                         </button>
                     </div>
                 </div>
@@ -303,6 +345,7 @@
 document.addEventListener('DOMContentLoaded', async function() {
     await loadModels();
     loadSettings();
+    loadModelsTable();
 });
 
 async function loadModels() {
@@ -459,6 +502,114 @@ async function testConfluence() {
         }
     } catch (error) {
         showToast('Connection test failed', 'error');
+    }
+}
+
+// ---- AI Models Management ----
+
+async function loadModelsTable() {
+    try {
+        const response = await api.get('/api/settings/models');
+        const models = response.models || [];
+        renderModelsTable(models);
+    } catch (error) {
+        console.error('Failed to load models table:', error);
+    }
+}
+
+function renderModelsTable(models) {
+    const tbody = document.getElementById('models-table-body');
+    if (!models.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No models configured</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = models.map((m, i) => `
+        <tr data-index="${i}">
+            <td><input type="text" class="form-control form-control-sm model-value" value="${m.value}" placeholder="model-id"></td>
+            <td><input type="text" class="form-control form-control-sm model-label" value="${m.label}" placeholder="Display Name"></td>
+            <td><input type="text" class="form-control form-control-sm model-group" value="${m.group}" placeholder="Group Name"></td>
+            <td>
+                <select class="form-select form-select-sm model-provider">
+                    <option value="gemini" ${m.provider === 'gemini' ? 'selected' : ''}>Gemini</option>
+                    <option value="bedrock" ${m.provider === 'bedrock' ? 'selected' : ''}>Bedrock</option>
+                </select>
+            </td>
+            <td><button class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
+        </tr>
+    `).join('');
+}
+
+function addModelRow() {
+    const tbody = document.getElementById('models-table-body');
+    // Remove "no models" placeholder if present
+    if (tbody.querySelector('td[colspan]')) tbody.innerHTML = '';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td><input type="text" class="form-control form-control-sm model-value" value="" placeholder="e.g. gemini-2.5-flash"></td>
+        <td><input type="text" class="form-control form-control-sm model-label" value="" placeholder="e.g. Gemini 2.5 Flash"></td>
+        <td><input type="text" class="form-control form-control-sm model-group" value="" placeholder="e.g. Gemini 2.5"></td>
+        <td>
+            <select class="form-select form-select-sm model-provider">
+                <option value="gemini">Gemini</option>
+                <option value="bedrock">Bedrock</option>
+            </select>
+        </td>
+        <td><button class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
+    `;
+    tbody.appendChild(tr);
+    tr.querySelector('.model-value').focus();
+}
+
+async function saveModels() {
+    const rows = document.querySelectorAll('#models-table-body tr');
+    const models = [];
+    let hasError = false;
+
+    rows.forEach(row => {
+        const value = row.querySelector('.model-value');
+        if (!value) return; // skip placeholder rows
+
+        const v = value.value.trim();
+        const label = row.querySelector('.model-label').value.trim();
+        const group = row.querySelector('.model-group').value.trim();
+        const provider = row.querySelector('.model-provider').value;
+
+        if (!v) { hasError = true; return; }
+
+        models.push({
+            value: v,
+            label: label || v,
+            group: group || (provider === 'bedrock' ? 'Anthropic Claude (Bedrock)' : 'Gemini'),
+            provider: provider,
+        });
+    });
+
+    if (hasError) {
+        showToast('Model ID cannot be empty', 'error');
+        return;
+    }
+
+    try {
+        await api.put('/api/settings/models', { models });
+        showToast(`Saved ${models.length} models`, 'success');
+        // Reload the default model dropdown too
+        await loadModels();
+    } catch (error) {
+        showToast('Failed to save models', 'error');
+    }
+}
+
+async function resetModelsToDefaults() {
+    if (!confirm('Reset to built-in default models? Any custom models will be removed.')) return;
+    try {
+        const result = await api.delete('/api/settings/models');
+        showToast('Models reset to defaults', 'success');
+        loadModelsTable();
+        await loadModels();
+    } catch (error) {
+        showToast('Failed to reset models', 'error');
     }
 }
 </script>

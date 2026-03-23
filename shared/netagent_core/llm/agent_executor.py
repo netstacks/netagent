@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, AsyncGenerator, Callable, Awaitable
 from datetime import datetime
 
-from .gemini_client import GeminiClient, GeminiResponse, ToolCall
+from .base_client import BaseLLMClient, LLMResponse, ToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class AgentExecutor:
 
     def __init__(
         self,
-        client: GeminiClient,
+        client: BaseLLMClient,
         system_prompt: str,
         tools: List[ToolDefinition] = None,
         max_iterations: int = 10,

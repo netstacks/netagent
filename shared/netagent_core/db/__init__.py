@@ -26,6 +26,7 @@ from .models import (
     JobTask,
     Memory,
     SessionSummary,
+    Alert,
 )
 
 __all__ = [
@@ -59,4 +60,5 @@ __all__ = [
     "JobTask",
     "Memory",
     "SessionSummary",
+    "Alert",
 ]

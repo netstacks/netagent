@@ -40,7 +40,7 @@ will pause until approval is granted or denied.
         db_session_factory: Callable,
         session_id: int,
         event_callback: Optional[Callable] = None,
-        default_timeout_minutes: int = 60,
+        default_timeout_minutes: int = 480,
     ):
         """Initialize the approval tool.
 

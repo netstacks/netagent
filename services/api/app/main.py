@@ -14,6 +14,7 @@ from netagent_core.db import init_db
 
 from routes import (
     agents,
+    alerts,
     chat,
     knowledge,
     devices,
@@ -48,9 +49,10 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized")
 
     # Seed default data
-    from services.seed import seed_agent_types, seed_agent_templates
+    from services.seed import seed_agent_types, seed_agent_templates, seed_api_resources
     seed_agent_types()
     seed_agent_templates()
+    seed_api_resources()
 
     yield
 
@@ -95,6 +97,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
+app.include_router(alerts.router, prefix="/api/alerts", tags=["Alerts"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(knowledge.router, prefix="/api/knowledge", tags=["Knowledge"])
 app.include_router(devices.router, prefix="/api/devices", tags=["Devices"])
